@@ -1,0 +1,25 @@
+{
+  "name": "refence",
+  "version": "0.1.0",
+  "description": "Run commands in a sandbox. Audit what got denied. Refine the policy.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ToQoz/refence"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "refence": "./bin/refence"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "docs/"
+  ],
+  "scripts": {
+    "test": "node --test tests/**/*.test.js"
+  }
+}

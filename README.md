@@ -1,0 +1,134 @@
+# refence
+
+Run commands in a sandbox. Audit what got denied. Refine the policy.
+
+## Synopsis
+
+    refence <command> [args...]
+    refence --interactive -- <agent-command...>
+    refence --patch <file> -- <command> [args...]
+    refence --rollback [STEP]
+
+## Install
+
+    npm install -g refence
+
+Prerequisites: `fence(1)`, `codex(1)`, Node.js >= 20.
+For `--interactive`: `tmux(1)` >= 3.2.
+
+## Description
+
+refence wraps any command with `fence(1)`, monitors sandbox violations,
+and uses an LLM to suggest minimal policy changes as a patch file.
+
+The default profile starts with an empty policy. Use
+`--profile <template>:<name>` to start from a fence built-in template
+(e.g. `code:myproj`). Changes are never applied automatically.
+
+## Usage
+
+Run a command:
+
+    $ refence npm install
+    [refence] exit: 1
+    Audit summary:
+      - denied network: registry.npmjs.org:443
+    Recommendation: Allow registry.npmjs.org for npm install.
+    Proposed policy diff:
+      ...
+    To apply and re-run:
+      refence --patch /tmp/refence-xxxxx/policy.json -- npm install
+
+Apply the suggestion:
+
+    $ refence --patch /tmp/refence-xxxxx/policy.json -- npm install
+
+Undo it:
+
+    $ refence --rollback
+
+### Interactive mode
+
+For coding agents that run interactively (Claude Code, Codex, etc.),
+use `--interactive`. refence monitors sandbox violations in real-time
+and interrupts the agent when access is denied:
+
+    $ refence --interactive -- claude -p "fix the failing tests"
+
+When a denial is detected:
+
+1. ESC is sent to the agent (graceful interrupt)
+2. The process is killed to apply new sandbox settings
+3. The terminal screen is captured (includes session ID)
+4. An LLM analyzes the violation and proposes a policy change
+5. A tmux popup shows the proposal for approval
+6. If accepted, the resume command is prefilled in your terminal
+
+## Template profiles
+
+Use `--profile <template>:<name>` to start a profile from a fence
+built-in template:
+
+    $ refence --profile code:npm-i npm install
+    $ refence --profile code:build npm run build
+
+On first run, `code:npm-i` is initialized with `{ "extends": "code" }`.
+It then behaves like any normal profile — patches, rollbacks, and
+suggestions all work. Each `<template>:<name>` profile evolves
+independently.
+
+`default:<name>` starts from an empty policy `{}`.
+
+Profiles without `:` (e.g. `--profile myproj`) are shorthand for
+`default:<name>` — they also start from an empty policy.
+
+Available fence templates can be listed with:
+
+    $ fence --list-templates
+
+## Options
+
+    --interactive         interactive agent mode (real-time denial monitoring)
+    --profile <name>      policy profile (default: default)
+                          use <template>:<name> to start from a fence template
+    --patch <file>        apply a policy patch before running
+    --rollback [STEP]     rollback to a previous policy snapshot (default: 1)
+    --suggest auto|never
+    --report text|json
+    --verbose
+    --help
+
+## Policy
+
+Policies live in `$XDG_CONFIG_HOME/refence/<profile>/fence.json`.
+Snapshots are kept in `$XDG_DATA_HOME/refence/<profile>/snapshots/`.
+
+The default profile (`default:default`) starts with an empty policy
+`{}`. Use `--profile <template>:<name>` to start from a fence template.
+
+See `docs/fence-cheatsheet.md` for the fence.json format.
+
+`--rollback` restores a previous snapshot. Snapshots are immutable;
+rollback writes directly without creating a new snapshot, so repeated
+rollback to the same step always reaches the same state.
+
+## Environment
+
+    REFENCE_MODEL    codex model for policy refinement (default: gpt-5.4-mini)
+
+## Known limitations
+
+- **TTY-dependent features**: with a TTY, refence uses an in-fence
+  proxy that isolates fence monitor output from agent stderr. Without
+  a TTY (e.g. CI), the proxy is skipped — policy suggestions are
+  disabled and audit output is marked as unverified, since a wrapped
+  command could emit fake fence monitor lines. Sandbox enforcement
+  still works regardless.
+
+- **codex dependency**: policy refinement requires `codex(1)`.
+  Without it, `--suggest auto` falls back to showing raw audit
+  summaries without proposed diffs.
+
+## License
+
+MIT
