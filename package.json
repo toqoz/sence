@@ -1,18 +1,18 @@
 {
-  "name": "refence",
+  "name": "@toqoz/sense",
   "version": "0.1.0",
-  "description": "Run commands in a sandbox. Audit what got denied. Refine the policy.",
+  "description": "A thin fence wrapper - suggests policy refinements.",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ToQoz/refence"
+    "url": "https://github.com/toqoz/sense"
   },
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "refence": "./bin/refence"
+    "sense": "./bin/sense"
   },
   "files": [
     "bin/",

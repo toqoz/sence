@@ -1,15 +1,15 @@
 import { writeFileSync, readFileSync, mkdtempSync } from "node:fs";
 import { execute, hasTty } from "./executor.js";
 import { audit } from "./auditor.js";
-import { runRefiner } from "./refiner.js";
+import { runSuggester } from "./suggester.js";
 import { formatText, formatJson } from "./reporter.js";
 import { resolvePolicyPath, resolveSnapshotDir, ensurePolicy, writePolicy, diffPolicy, rollbackPolicy, validatePolicy, mergePolicy, resolveProfileName, defaultPolicyForProfile } from "./policy.js";
 import { runInteractiveMode } from "./modes/interactive.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const HELP_TEXT = `Usage: refence [options] [--] <command...>
-       refence --interactive -- <agent-command...>
+const HELP_TEXT = `Usage: sense [options] [--] <command...>
+       sense --interactive -- <agent-command...>
 
 Run a command inside a fence sandbox with monitoring, audit, and policy advice.
 
@@ -20,20 +20,20 @@ Options:
                                Run \`fence --list-templates\` for available templates
   --patch <file>               Apply a policy patch file before running the command
   --rollback [STEP]            Rollback policy (default: 1)
-  --model <name>               LLM model for policy refinement (default: gpt-5.4-mini)
+  --model <name>               LLM model for policy suggestions (default: gpt-5.4-mini)
   --suggest auto|never         When to generate advice (default: auto)
   --report text|json           Output format for audit report (default: text)
-  --verbose                    Always show refence audit output
+  --verbose                    Always show sense audit output
   --help                       Show this help message
 
 Examples:
-  refence npm install
-  refence --interactive -- claude -p "fix the failing tests"
-  refence --profile code:npm-i npm install
-  refence --profile code:default npm install
-  refence --profile strict npm install
-  refence --patch /tmp/refence-abc123.json npm install
-  refence --rollback
+  sense npm install
+  sense --interactive -- claude -p "fix the failing tests"
+  sense --profile code:npm-i npm install
+  sense --profile code:default npm install
+  sense --profile strict npm install
+  sense --patch /tmp/sense-abc123.json npm install
+  sense --rollback
 `;
 
 const FLAG_WITH_VALUE = new Set(["--suggest", "--report", "--profile", "--patch", "--model"]);
@@ -89,7 +89,7 @@ export function parseArgs(argv) {
       continue;
     }
     if (arg.startsWith("--")) {
-      opts.error = `Unknown flag: ${arg}. See: refence --help`;
+      opts.error = `Unknown flag: ${arg}. See: sense --help`;
       return opts;
     }
     break;
@@ -108,13 +108,13 @@ export function parseArgs(argv) {
 
   if (opts.interactive) {
     if (opts.command.length === 0) {
-      opts.error = "No command specified. Usage: refence --interactive -- <agent-command...>";
+      opts.error = "No command specified. Usage: sense --interactive -- <agent-command...>";
     }
     return opts;
   }
 
   if (opts.command.length === 0) {
-    opts.error = "No command specified. See: refence --help";
+    opts.error = "No command specified. See: sense --help";
     return opts;
   }
 
@@ -130,7 +130,7 @@ export function parseArgs(argv) {
 function getConfigDir() {
   if (process.env.XDG_CONFIG_HOME) return process.env.XDG_CONFIG_HOME;
   if (!process.env.HOME) {
-    process.stderr.write("[refence] Fatal: HOME is not set.\n");
+    process.stderr.write("[sense] Fatal: HOME is not set.\n");
     process.exit(2);
   }
   return join(process.env.HOME, ".config");
@@ -139,7 +139,7 @@ function getConfigDir() {
 function getDataDir() {
   if (process.env.XDG_DATA_HOME) return process.env.XDG_DATA_HOME;
   if (!process.env.HOME) {
-    process.stderr.write("[refence] Fatal: HOME is not set.\n");
+    process.stderr.write("[sense] Fatal: HOME is not set.\n");
     process.exit(2);
   }
   return join(process.env.HOME, ".local", "share");
@@ -150,8 +150,8 @@ function shellQuote(s) {
   return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
-function buildRefenceCmd(opts) {
-  const parts = ["refence"];
+function buildSenseCmd(opts) {
+  const parts = ["sense"];
   if (opts.profile !== "default") parts.push("--profile", shellQuote(opts.profile));
   return parts;
 }
@@ -182,15 +182,15 @@ export async function run(argv) {
     try {
       result = rollbackPolicy(policyPath, { snapshotDir, steps: opts.rollback });
     } catch (err) {
-      process.stderr.write(`[refence] Rollback failed: ${err.message}\n`);
+      process.stderr.write(`[sense] Rollback failed: ${err.message}\n`);
       process.exit(1);
     }
     if (result.error) {
-      process.stderr.write(`[refence] ${result.error}\n`);
+      process.stderr.write(`[sense] ${result.error}\n`);
       process.exit(1);
     }
-    process.stderr.write(`[refence] Rolled back policy to ${result.from}\n`);
-    process.stderr.write(`[refence] Policy written to ${policyPath}\n`);
+    process.stderr.write(`[sense] Rolled back policy to ${result.from}\n`);
+    process.stderr.write(`[sense] Policy written to ${policyPath}\n`);
     process.exit(0);
   }
 
@@ -210,7 +210,7 @@ export async function run(argv) {
   try {
     initPolicy = defaultPolicyForProfile(opts.profile);
   } catch (err) {
-    process.stderr.write(`[refence] ${err.message}\n`);
+    process.stderr.write(`[sense] ${err.message}\n`);
     process.exit(2);
   }
 
@@ -219,8 +219,8 @@ export async function run(argv) {
     currentPolicy = ensurePolicy(policyPath, { snapshotDir, defaultPolicy: initPolicy });
   } catch (err) {
     process.stderr.write(
-      `[refence] Fatal: ${policyPath} is corrupt — ${err.message}\n` +
-      `[refence] Fix or remove the file manually.\n`,
+      `[sense] Fatal: ${policyPath} is corrupt — ${err.message}\n` +
+      `[sense] Fix or remove the file manually.\n`,
     );
     process.exit(2);
   }
@@ -232,7 +232,7 @@ export async function run(argv) {
       const merged = mergePolicy(currentPolicy, patchData);
       const policyErrors = validatePolicy(merged);
       if (policyErrors.length > 0) {
-        process.stderr.write(`[refence] Refusing to apply unsafe policy:\n`);
+        process.stderr.write(`[sense] Refusing to apply unsafe policy:\n`);
         for (const e of policyErrors) {
           process.stderr.write(`  - ${e}\n`);
         }
@@ -240,9 +240,9 @@ export async function run(argv) {
       }
       writePolicy(policyPath, merged, { snapshotDir });
       currentPolicy = merged;
-      process.stderr.write(`[refence] Applied policy patch to ${policyPath}\n`);
+      process.stderr.write(`[sense] Applied policy patch to ${policyPath}\n`);
     } catch (err) {
-      process.stderr.write(`[refence] Failed to apply patch: ${err.message}\n`);
+      process.stderr.write(`[sense] Failed to apply patch: ${err.message}\n`);
       process.exit(2);
     }
   }
@@ -255,7 +255,7 @@ export async function run(argv) {
 
   if (execResult.spawnError) {
     process.stderr.write(
-      `[refence] Fatal: failed to launch sandbox — ${execResult.spawnError}\n`,
+      `[sense] Fatal: failed to launch sandbox — ${execResult.spawnError}\n`,
     );
     process.exit(127);
   }
@@ -273,14 +273,14 @@ export async function run(argv) {
   let rec = { autoApplied: false };
   const wantSuggest = opts.suggest === "auto" && hasDenials;
 
-  // Without TTY, stderr isolation is unavailable — skip refiner to avoid spoofed audit feeding policy suggestions
+  // Without TTY, stderr isolation is unavailable — skip suggester to avoid spoofed audit feeding policy suggestions
   const canSuggest = wantSuggest && hasTty();
   if (wantSuggest && !hasTty()) {
-    process.stderr.write("[refence] No TTY — skipping policy suggestions (audit data may be spoofed without stderr isolation).\n");
+    process.stderr.write("[sense] No TTY — skipping policy suggestions (audit data may be spoofed without stderr isolation).\n");
   }
 
   if (canSuggest) {
-    rec = runRefiner({ currentPolicy, auditSummary, model: opts.model });
+    rec = runSuggester({ currentPolicy, auditSummary, model: opts.model });
 
     if (rec.proposedPolicy) {
       // Diff against the merged result so the displayed diff matches what --patch actually applies
@@ -289,7 +289,7 @@ export async function run(argv) {
 
       // Write patch file (partial — will be merged on apply)
       if (rec.policyDiff) {
-        const tmpDir = mkdtempSync(join(tmpdir(), "refence-"));
+        const tmpDir = mkdtempSync(join(tmpdir(), "sense-"));
         const patchFile = join(tmpDir, "policy.json");
         writeFileSync(patchFile, JSON.stringify(rec.proposedPolicy, null, 2) + "\n");
         rec.patchFile = patchFile;
@@ -307,7 +307,7 @@ export async function run(argv) {
 
   if (showReport) {
     if (!hasTty() && hasDenials) {
-      process.stderr.write("[refence] Warning: no TTY — audit data is unverified (stderr isolation not available).\n");
+      process.stderr.write("[sense] Warning: no TTY — audit data is unverified (stderr isolation not available).\n");
     }
 
     const output =
@@ -321,7 +321,7 @@ export async function run(argv) {
 
   // Show apply command if patch was generated
   if (rec.patchFile) {
-    const cmdParts = buildRefenceCmd(opts);
+    const cmdParts = buildSenseCmd(opts);
     cmdParts.push("--patch", shellQuote(rec.patchFile), "--", ...opts.command.map(shellQuote));
     process.stderr.write(`\nTo apply and re-run:\n  ${cmdParts.join(" ")}\n`);
   }

@@ -1,6 +1,6 @@
 # fence.json reference
 
-refence starts from `{"extends": "code-strict"}`. Your policy only needs to add or override what's different.
+sense starts from `{"extends": "code-strict"}`. Your policy only needs to add or override what's different.
 
 ## Schema (only write what you're changing)
 

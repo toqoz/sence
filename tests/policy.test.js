@@ -19,22 +19,22 @@ import {
 } from "../src/policy.js";
 
 describe("resolvePolicyPath", () => {
-  it("resolves to <configDir>/refence/<profile>/fence.json", () => {
+  it("resolves to <configDir>/sense/<profile>/fence.json", () => {
     const path = resolvePolicyPath({ configDir: "/home/user/.config", profile: "default" });
-    assert.equal(path, "/home/user/.config/refence/default/fence.json");
+    assert.equal(path, "/home/user/.config/sense/default/fence.json");
   });
 });
 
 describe("resolveSnapshotDir", () => {
-  it("resolves to <dataDir>/refence/<profile>/snapshots", () => {
+  it("resolves to <dataDir>/sense/<profile>/snapshots", () => {
     const path = resolveSnapshotDir({ dataDir: "/home/user/.local/share", profile: "default" });
-    assert.equal(path, "/home/user/.local/share/refence/default/snapshots");
+    assert.equal(path, "/home/user/.local/share/sense/default/snapshots");
   });
 });
 
 describe("readPolicy", () => {
   let tmpDir;
-  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), "refence-test-")); });
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), "sense-test-")); });
   afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
   it("returns null when file does not exist", () => {
@@ -57,7 +57,7 @@ describe("readPolicy", () => {
 
 describe("ensurePolicy", () => {
   let tmpDir;
-  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), "refence-test-")); });
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), "sense-test-")); });
   afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
   it("creates policy with given defaultPolicy when file does not exist", () => {
@@ -91,7 +91,7 @@ describe("ensurePolicy", () => {
 describe("writePolicy + snapshots", () => {
   let tmpDir, sDir;
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "refence-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "sense-test-"));
     sDir = join(tmpDir, "snapshots");
   });
   afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
@@ -115,7 +115,7 @@ describe("writePolicy + snapshots", () => {
 describe("rollback", () => {
   let tmpDir, sDir;
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "refence-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "sense-test-"));
     sDir = join(tmpDir, "snapshots");
   });
   afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });

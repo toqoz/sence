@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const BIN = join(__dirname, "..", "bin", "refence");
+const BIN = join(__dirname, "..", "bin", "sense");
 const TEST_TMP = join(__dirname, "tmp");
 mkdirSync(TEST_TMP, { recursive: true });
 
@@ -25,25 +25,25 @@ function hasPrereqs() {
 
 // Tests that don't need tmux (no fence execution)
 describe("integration: CLI basics", () => {
-  function refence(args) {
+  function sense(args) {
     return spawnSync("node", [BIN, ...args], { encoding: "utf-8", timeout: 10_000 });
   }
 
   it("shows help with --help", () => {
-    const r = refence(["--help"]);
+    const r = sense(["--help"]);
     assert.equal(r.status, 0);
     assert.ok(r.stdout.includes("Usage:"));
     assert.ok(r.stdout.includes("--interactive"));
   });
 
   it("shows error when no command given", () => {
-    const r = refence([]);
+    const r = sense([]);
     assert.equal(r.status, 2);
     assert.ok(r.stderr.includes("No command specified"));
   });
 
   it("shows error for invalid --suggest value", () => {
-    const r = refence(["--suggest", "maybe", "echo"]);
+    const r = sense(["--suggest", "maybe", "echo"]);
     assert.equal(r.status, 2);
     assert.ok(r.stderr.includes("maybe"));
   });
@@ -52,7 +52,7 @@ describe("integration: CLI basics", () => {
 // Tests that need tmux + fence
 let sessionCounter = 0;
 function newSession() {
-  return `refence-integ-${process.pid}-${++sessionCounter}`;
+  return `sense-integ-${process.pid}-${++sessionCounter}`;
 }
 let SESSION;
 
@@ -98,8 +98,8 @@ describe("integration: batch mode via tmux", { skip: !hasPrereqs() && "tmux or f
     sendKeys(`node ${BIN} --suggest never echo hello-batch-test`, "Enter");
     const content = await waitForContent(/hello-batch-test/);
     assert.ok(content.includes("hello-batch-test"));
-    // Should NOT show refence output on clean run
-    assert.ok(!content.includes("[refence]"));
+    // Should NOT show sense output on clean run
+    assert.ok(!content.includes("[sense]"));
     await waitForShell();
   });
 
@@ -119,8 +119,8 @@ describe("integration: batch mode via tmux", { skip: !hasPrereqs() && "tmux or f
 
   it("shows verbose output with --verbose", async () => {
     sendKeys(`node ${BIN} --suggest never --verbose echo hi`, "Enter");
-    const content = await waitForContent(/\[refence\]/);
-    assert.ok(content.includes("[refence]"));
+    const content = await waitForContent(/\[sense\]/);
+    assert.ok(content.includes("[sense]"));
     assert.ok(content.includes("exit: 0"));
     await waitForShell();
   });
@@ -142,7 +142,7 @@ describe("integration: batch mode via tmux", { skip: !hasPrereqs() && "tmux or f
     await waitForShell();
 
     // Read the policy content
-    const policyPath = join(cfgDir, "refence", "default:default", "fence.json");
+    const policyPath = join(cfgDir, "sense", "default:default", "fence.json");
 
     // Run a command that fails (denied) — policy should NOT change
     sendKeys(`XDG_CONFIG_HOME=${cfgDir} XDG_DATA_HOME=${dataDir} node ${BIN} --suggest never curl -s https://example.com; echo FAIL_DONE`, "Enter");
@@ -174,7 +174,7 @@ describe("integration: stderr isolation", { skip: !hasPrereqs() && "tmux or fenc
     sendKeys(cmd, "Enter");
     const content = await waitForContent(/DONE/);
     // The fake line should be visible in the pane (agent wrote to tty)
-    // But refence audit should NOT contain fake.evil
+    // But sense audit should NOT contain fake.evil
     assert.ok(!content.includes("denied network: fake.evil"), "fake fence line should not be in audit");
     await waitForShell();
   });
@@ -184,7 +184,7 @@ function hasCodex() {
   return spawnSync("codex", ["--version"], { encoding: "utf-8" }).status === 0;
 }
 
-describe("integration: refiner via tmux", { skip: (!hasPrereqs() || !hasCodex()) && "tmux, fence, or codex not available", timeout: 20_000 }, () => {
+describe("integration: suggester via tmux", { skip: (!hasPrereqs() || !hasCodex()) && "tmux, fence, or codex not available", timeout: 20_000 }, () => {
   before(async () => {
     SESSION = newSession();
     tmux("new-session", "-d", "-s", SESSION, "-x", "120", "-y", "40");
@@ -194,7 +194,7 @@ describe("integration: refiner via tmux", { skip: (!hasPrereqs() || !hasCodex())
 
   it("generates recommendation when denials occur", { timeout: 15_000 }, async () => {
     sendKeys(`node ${BIN} -- curl -s https://example.com`, "Enter");
-    // Wait for refiner to finish — look for the line that always appears at the end
+    // Wait for suggester to finish — look for the line that always appears at the end
     const content = await waitForContent(/No changes were applied automatically/, 12_000);
     // Should NOT show schema validation error
     assert.ok(!content.includes("invalid_json_schema"), "output-schema should be accepted by the API");
@@ -237,7 +237,7 @@ describe("integration: patch + rollback via tmux", { skip: !hasPrereqs() && "tmu
       `Expected patch output, got:\n${content.slice(-300)}`,
     );
 
-    const policyPath = join(configDir, "refence", "default:default", "fence.json");
+    const policyPath = join(configDir, "sense", "default:default", "fence.json");
     assert.ok(existsSync(policyPath), `fence.json should exist at ${policyPath}`);
   });
 });

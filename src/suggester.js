@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CHEATSHEET = readFileSync(join(__dirname, "..", "docs", "fence-cheatsheet.md"), "utf-8");
-const SCHEMA_PATH = join(__dirname, "..", "docs", "refiner-schema.json");
+const SCHEMA_PATH = join(__dirname, "..", "docs", "suggester-schema.json");
 
 const DEFAULT_MODEL = "gpt-5.4-mini";
 
@@ -126,12 +126,12 @@ export function callCodex({ prompt, schemaPath, model }) {
   });
 
   if (result.error) {
-    return { error: `Refiner failed to start: ${result.error.message}`, autoApplied: false };
+    return { error: `Suggester failed to start: ${result.error.message}`, autoApplied: false };
   }
 
   if (result.status !== 0) {
     return {
-      error: `Refiner exited with code ${result.status}`,
+      error: `Suggester exited with code ${result.status}`,
       rawOutput: (result.stderr || result.stdout || "").slice(-2000),
       autoApplied: false,
     };
@@ -140,7 +140,7 @@ export function callCodex({ prompt, schemaPath, model }) {
   return parseRecommendation(result.stdout ?? "");
 }
 
-export function runRefiner({ currentPolicy, auditSummary, model }) {
+export function runSuggester({ currentPolicy, auditSummary, model }) {
   const prompt = buildPrompt({ currentPolicy, auditSummary });
   return callCodex({ prompt, schemaPath: SCHEMA_PATH, model });
 }

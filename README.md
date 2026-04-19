@@ -1,13 +1,13 @@
-# refence
+# sense
 
-A self-refining sandbox fence.
+A thin fence wrapper - suggests policy refinements.
 
 ## Synopsis
 
-    refence <command> [args...]
-    refence --interactive -- <agent-command...>
-    refence --patch <file> -- <command> [args...]
-    refence --rollback [STEP]
+    sense <command> [args...]
+    sense --interactive -- <agent-command...>
+    sense --patch <file> -- <command> [args...]
+    sense --rollback [STEP]
 
 ## Requirements
 
@@ -18,11 +18,11 @@ A self-refining sandbox fence.
 
 ## Install
 
-    npm install -g refence
+    npm install -g @toqoz/sense
 
 ## Description
 
-refence wraps any command with `fence(1)`, monitors sandbox violations,
+sense wraps any command with `fence(1)`, monitors sandbox violations,
 and uses an LLM to suggest minimal policy changes as a patch file.
 
 The default profile starts with an empty policy. Use
@@ -33,31 +33,31 @@ The default profile starts with an empty policy. Use
 
 Run a command:
 
-    $ refence npm install
-    [refence] exit: 1
+    $ sense npm install
+    [sense] exit: 1
     Audit summary:
       - denied network: registry.npmjs.org:443
     Recommendation: Allow registry.npmjs.org for npm install.
     Proposed policy diff:
       ...
     To apply and re-run:
-      refence --patch /tmp/refence-xxxxx/policy.json -- npm install
+      sense --patch /tmp/sense-xxxxx/policy.json -- npm install
 
 Apply the suggestion:
 
-    $ refence --patch /tmp/refence-xxxxx/policy.json -- npm install
+    $ sense --patch /tmp/sense-xxxxx/policy.json -- npm install
 
 Undo it:
 
-    $ refence --rollback
+    $ sense --rollback
 
 ### Interactive mode
 
 For coding agents that run interactively (Claude Code, Codex, etc.),
-use `--interactive`. refence monitors sandbox violations in real-time
+use `--interactive`. sense monitors sandbox violations in real-time
 and interrupts the agent when access is denied:
 
-    $ refence --interactive -- claude
+    $ sense --interactive -- claude
 
 When a denial is detected:
 
@@ -73,8 +73,8 @@ When a denial is detected:
 Use `--profile <template>:<name>` to start a profile from a fence
 built-in template:
 
-    $ refence --profile code:npm-i npm install
-    $ refence --profile code:build npm run build
+    $ sense --profile code:npm-i npm install
+    $ sense --profile code:build npm run build
 
 On first run, `code:npm-i` is initialized with `{ "extends": "code" }`.
 It then behaves like any normal profile — patches, rollbacks, and
@@ -95,6 +95,7 @@ Available fence templates can be listed with:
     --interactive         interactive agent mode (real-time denial monitoring)
     --profile <name>      policy profile (default: default)
                           use <template>:<name> to start from a fence template
+    --model <name>        LLM model for policy suggestions (default: gpt-5.4-mini)
     --patch <file>        apply a policy patch before running
     --rollback [STEP]     rollback to a previous policy snapshot (default: 1)
     --suggest auto|never
@@ -104,8 +105,8 @@ Available fence templates can be listed with:
 
 ## Policy
 
-Policies live in `$XDG_CONFIG_HOME/refence/<profile>/fence.json`.
-Snapshots are kept in `$XDG_DATA_HOME/refence/<profile>/snapshots/`.
+Policies live in `$XDG_CONFIG_HOME/sense/<profile>/fence.json`.
+Snapshots are kept in `$XDG_DATA_HOME/sense/<profile>/snapshots/`.
 
 The default profile (`default:default`) starts with an empty policy
 `{}`. Use `--profile <template>:<name>` to start from a fence template.
@@ -118,7 +119,7 @@ rollback to the same step always reaches the same state.
 
 ## Known limitations
 
-- **TTY-dependent features**: with a TTY, refence passes an extra
+- **TTY-dependent features**: with a TTY, sense passes an extra
   inherited fd to isolate fence monitor output from agent stderr.
   Without a TTY (e.g. CI), this isolation is unavailable — policy
   suggestions are disabled and audit output is marked as unverified,
@@ -128,7 +129,7 @@ rollback to the same step always reaches the same state.
   available, this workaround will be replaced by reading monitor
   output from a log file, removing the TTY dependency entirely.
 
-- **codex dependency**: policy refinement requires `codex(1)`.
+- **codex dependency**: policy suggestions require `codex(1)`.
   Without it, `--suggest auto` falls back to showing raw audit
   summaries without proposed diffs.
 

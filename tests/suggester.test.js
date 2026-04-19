@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildPrompt, parseRecommendation } from "../src/refiner.js";
+import { buildPrompt, parseRecommendation } from "../src/suggester.js";
 
 describe("buildPrompt", () => {
   it("includes current policy JSON", () => {

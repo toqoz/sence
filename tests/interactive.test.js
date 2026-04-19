@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const BIN = join(__dirname, "..", "bin", "refence");
+const BIN = join(__dirname, "..", "bin", "sense");
 const MOCK_AGENT = join(__dirname, "fixtures", "mock-agent.js");
 
-const SESSION = `refence-test-${process.pid}`;
+const SESSION = `sense-test-${process.pid}`;
 
 function tmux(...args) {
   const result = spawnSync("tmux", args, { encoding: "utf-8", timeout: 10_000 });
@@ -109,7 +109,7 @@ function waitForShell(timeoutMs = 10_000) {
   sleep(500);
 }
 
-describe("interactive: refence monitors denial and interrupts mock agent", { skip: (!hasTmux() || !hasFence()) && "tmux or fence not available" }, () => {
+describe("interactive: sense monitors denial and interrupts mock agent", { skip: (!hasTmux() || !hasFence()) && "tmux or fence not available" }, () => {
   before(() => {
     createSession();
     waitForShell();
@@ -121,12 +121,12 @@ describe("interactive: refence monitors denial and interrupts mock agent", { ski
     sendKeys(cmd, "Enter");
 
     // Wait for the full flow: agent starts → denial → ESC → kill → audit
-    const content = waitForContent(/interrupted by user|Analyzing|Refiner/, 20_000);
+    const content = waitForContent(/interrupted by user|Analyzing|Suggester/, 20_000);
 
     assert.ok(
       content.includes("interrupted by user") ||
-        content.includes("[refence]"),
-      `Expected agent interruption or refence output, got:\n${content.slice(-500)}`,
+        content.includes("[sense]"),
+      `Expected agent interruption or sense output, got:\n${content.slice(-500)}`,
     );
   });
 

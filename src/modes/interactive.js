@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { buildFenceArgs } from "../executor.js";
 import { audit } from "../auditor.js";
-import { callCodex } from "../refiner.js";
+import { callCodex } from "../suggester.js";
 import { ensurePolicy, writePolicy, diffPolicy, validatePolicy, mergePolicy, defaultPolicyForProfile } from "../policy.js";
 import { isInsideTmux, sendEscape, capturePaneContent, displayPopup, supportsPopup, currentPane, prefillInput } from "../tmux.js";
 import { shellQuote } from "../cli.js";
@@ -64,20 +64,20 @@ Reply with ONLY this JSON:
 {"proposedPolicy":{...},"explanation":"one short sentence","resumeCommand":"command to resume or null"}`;
 }
 
-function runInteractiveRefiner({ currentPolicy, auditSummary, screenContent, originalCommand, model }) {
+function runInteractiveSuggester({ currentPolicy, auditSummary, screenContent, originalCommand, model }) {
   const prompt = buildInteractivePrompt({ currentPolicy, auditSummary, screenContent, originalCommand });
   return callCodex({ prompt, schemaPath: INTERACTIVE_SCHEMA, model });
 }
 
 export async function runInteractiveMode({ command, policyPath, snapshotDir, profile, suggest = "auto", model }) {
   if (!isInsideTmux()) {
-    process.stderr.write("[refence] --interactive requires tmux.\n");
+    process.stderr.write("[sense] --interactive requires tmux.\n");
     process.exit(2);
   }
 
   const paneId = currentPane();
   if (!paneId) {
-    process.stderr.write("[refence] Could not detect tmux pane.\n");
+    process.stderr.write("[sense] Could not detect tmux pane.\n");
     process.exit(2);
   }
 
@@ -86,8 +86,8 @@ export async function runInteractiveMode({ command, policyPath, snapshotDir, pro
     currentPolicy = ensurePolicy(policyPath, { snapshotDir, defaultPolicy: defaultPolicyForProfile(profile) });
   } catch (err) {
     process.stderr.write(
-      `[refence] Fatal: ${policyPath} is corrupt — ${err.message}\n` +
-      `[refence] Fix or remove the file manually.\n`,
+      `[sense] Fatal: ${policyPath} is corrupt — ${err.message}\n` +
+      `[sense] Fix or remove the file manually.\n`,
     );
     process.exit(2);
   }
@@ -108,13 +108,13 @@ export async function runInteractiveMode({ command, policyPath, snapshotDir, pro
   const auditSummary = audit({ exitCode, monitorLog });
 
   if (suggest === "never") {
-    process.stderr.write(`[refence] ${denials.length} denial(s) detected. Skipping suggestions (--suggest never).\n`);
+    process.stderr.write(`[sense] ${denials.length} denial(s) detected. Skipping suggestions (--suggest never).\n`);
     process.exit(exitCode);
   }
 
-  // Refine
-  process.stderr.write("[refence] Analyzing sandbox violations...\n");
-  const rec = runInteractiveRefiner({
+  // Suggest
+  process.stderr.write("[sense] Analyzing sandbox violations...\n");
+  const rec = runInteractiveSuggester({
     currentPolicy,
     auditSummary,
     screenContent,
@@ -123,7 +123,7 @@ export async function runInteractiveMode({ command, policyPath, snapshotDir, pro
   });
 
   if (rec.error || !rec.proposedPolicy) {
-    process.stderr.write(`[refence] Refiner error: ${rec.error || "no proposal"}\n`);
+    process.stderr.write(`[sense] Suggester error: ${rec.error || "no proposal"}\n`);
     process.exit(exitCode);
   }
 
@@ -132,13 +132,13 @@ export async function runInteractiveMode({ command, policyPath, snapshotDir, pro
 
   const policyDiff = diffPolicy(currentPolicy, mergedPolicy);
   if (!policyDiff) {
-    process.stderr.write("[refence] No policy changes suggested.\n");
+    process.stderr.write("[sense] No policy changes suggested.\n");
     process.exit(exitCode);
   }
 
   const errors = validatePolicy(mergedPolicy);
   if (errors.length > 0) {
-    process.stderr.write("[refence] Refusing unsafe policy:\n");
+    process.stderr.write("[sense] Refusing unsafe policy:\n");
     for (const e of errors) process.stderr.write(`  - ${e}\n`);
     process.exit(exitCode);
   }
@@ -153,15 +153,15 @@ export async function runInteractiveMode({ command, policyPath, snapshotDir, pro
 
   if (policyAccepted) {
     writePolicy(policyPath, mergedPolicy, { snapshotDir });
-    process.stderr.write(`[refence] Policy updated: ${policyPath}\n`);
+    process.stderr.write(`[sense] Policy updated: ${policyPath}\n`);
   } else {
-    process.stderr.write("[refence] Policy not changed.\n");
+    process.stderr.write("[sense] Policy not changed.\n");
   }
 
   // Step 2: Show resume command and prefill in the pane
   // NOTE: The resume command is LLM-generated. Review before executing.
   if (rec.resumeCommand) {
-    const resumeCmd = `refence --interactive -- ${rec.resumeCommand}`;
+    const resumeCmd = `sense --interactive -- ${rec.resumeCommand}`;
     process.stderr.write(`\nSuggested resume command (review before running):\n  ${resumeCmd}\n`);
     prefillInput(paneId, resumeCmd);
   }
@@ -245,7 +245,7 @@ async function askPolicyApply({ auditSummary, explanation, policyDiff, paneId })
   const content = lines.join("\n");
 
   if (supportsPopup()) {
-    const tmpDir = mkdtempSync(join(tmpdir(), "refence-review-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "sense-review-"));
     const reviewFile = join(tmpDir, "review.txt");
     const scriptFile = join(tmpDir, "review.sh");
     const resultFile = join(tmpDir, "result");
