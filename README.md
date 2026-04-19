@@ -57,7 +57,7 @@ For coding agents that run interactively (Claude Code, Codex, etc.),
 use `--interactive`. refence monitors sandbox violations in real-time
 and interrupts the agent when access is denied:
 
-    $ refence --interactive -- claude -p "fix the failing tests"
+    $ refence --interactive -- claude
 
 When a denial is detected:
 
