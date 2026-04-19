@@ -1,14 +1,15 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { writeFileSync, readFileSync, mkdtempSync, rmSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, mkdirSync, mkdtempSync, rmSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BIN = join(__dirname, "..", "bin", "refence");
+const TEST_TMP = join(__dirname, "tmp");
+mkdirSync(TEST_TMP, { recursive: true });
 
 function hasTmux() {
   return spawnSync("tmux", ["-V"], { encoding: "utf-8" }).status === 0;
@@ -133,8 +134,8 @@ describe("integration: batch mode via tmux", { skip: !hasPrereqs() && "tmux or f
   });
 
   it("does not modify policy on a failed run without --patch", async () => {
-    const cfgDir = join(__dirname, "..", ".refence-noapply-test");
-    const dataDir = join(__dirname, "..", ".refence-noapply-data");
+    const cfgDir = join(TEST_TMP, "noapply-config");
+    const dataDir = join(TEST_TMP, "noapply-data");
     // Ensure policy exists
     sendKeys(`XDG_CONFIG_HOME=${cfgDir} XDG_DATA_HOME=${dataDir} node ${BIN} --suggest never echo init; echo INIT_DONE`, "Enter");
     await waitForContent(/INIT_DONE/);
@@ -208,7 +209,7 @@ describe("integration: patch + rollback via tmux", { skip: !hasPrereqs() && "tmu
 
   before(async () => {
     // Use workspace-relative tmp so fence allows writes
-    tmpDir = mkdtempSync(join(__dirname, "..", ".refence-test-"));
+    tmpDir = mkdtempSync(join(TEST_TMP, "patch-"));
     SESSION = newSession();
     tmux("new-session", "-d", "-s", SESSION, "-x", "120", "-y", "40");
     await waitForShell();
