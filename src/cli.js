@@ -20,6 +20,7 @@ Options:
                                Run \`fence --list-templates\` for available templates
   --patch <file>               Apply a policy patch file before running the command
   --rollback [STEP]            Rollback policy (default: 1)
+  --model <name>               LLM model for policy refinement (default: gpt-5.4-mini)
   --suggest auto|never         When to generate advice (default: auto)
   --report text|json           Output format for audit report (default: text)
   --verbose                    Always show refence audit output
@@ -35,7 +36,7 @@ Examples:
   refence --rollback
 `;
 
-const FLAG_WITH_VALUE = new Set(["--suggest", "--report", "--profile", "--patch"]);
+const FLAG_WITH_VALUE = new Set(["--suggest", "--report", "--profile", "--patch", "--model"]);
 const BOOLEAN_FLAGS = new Set(["--verbose", "--help", "--interactive"]);
 
 export function parseArgs(argv) {
@@ -43,6 +44,7 @@ export function parseArgs(argv) {
     suggest: "auto",
     report: "text",
     profile: "default",
+    model: undefined,
     patch: undefined,
     rollback: undefined,
     interactive: false,
@@ -199,6 +201,7 @@ export async function run(argv) {
       snapshotDir,
       profile: opts.profile,
       suggest: opts.suggest,
+      model: opts.model,
     });
     return;
   }
@@ -277,7 +280,7 @@ export async function run(argv) {
   }
 
   if (canSuggest) {
-    rec = runRefiner({ currentPolicy, auditSummary });
+    rec = runRefiner({ currentPolicy, auditSummary, model: opts.model });
 
     if (rec.proposedPolicy) {
       // Diff against the merged result so the displayed diff matches what --patch actually applies

@@ -116,10 +116,6 @@ See `docs/fence-cheatsheet.md` for the fence.json format.
 rollback writes directly without creating a new snapshot, so repeated
 rollback to the same step always reaches the same state.
 
-## Environment
-
-    REFENCE_MODEL    codex model for policy refinement (default: gpt-5.4-mini)
-
 ## Known limitations
 
 - **TTY-dependent features**: with a TTY, refence passes an extra

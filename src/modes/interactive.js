@@ -64,12 +64,12 @@ Reply with ONLY this JSON:
 {"proposedPolicy":{...},"explanation":"one short sentence","resumeCommand":"command to resume or null"}`;
 }
 
-function runInteractiveRefiner({ currentPolicy, auditSummary, screenContent, originalCommand }) {
+function runInteractiveRefiner({ currentPolicy, auditSummary, screenContent, originalCommand, model }) {
   const prompt = buildInteractivePrompt({ currentPolicy, auditSummary, screenContent, originalCommand });
-  return callCodex({ prompt, schemaPath: INTERACTIVE_SCHEMA });
+  return callCodex({ prompt, schemaPath: INTERACTIVE_SCHEMA, model });
 }
 
-export async function runInteractiveMode({ command, policyPath, snapshotDir, profile, suggest = "auto" }) {
+export async function runInteractiveMode({ command, policyPath, snapshotDir, profile, suggest = "auto", model }) {
   if (!isInsideTmux()) {
     process.stderr.write("[refence] --interactive requires tmux.\n");
     process.exit(2);
@@ -119,6 +119,7 @@ export async function runInteractiveMode({ command, policyPath, snapshotDir, pro
     auditSummary,
     screenContent,
     originalCommand: command,
+    model,
   });
 
   if (rec.error || !rec.proposedPolicy) {

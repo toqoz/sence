@@ -9,10 +9,6 @@ const SCHEMA_PATH = join(__dirname, "..", "docs", "refiner-schema.json");
 
 const DEFAULT_MODEL = "gpt-5.4-mini";
 
-function getModel() {
-  return process.env.REFENCE_MODEL || DEFAULT_MODEL;
-}
-
 export function buildPrompt({ currentPolicy, auditSummary }) {
   return `Recommend a fence.json policy change based on the audit below.
 
@@ -108,10 +104,10 @@ export function parseRecommendation(output) {
   return { error: "Failed to parse recommendation from output", rawOutput: output, ...base };
 }
 
-export function callCodex({ prompt, schemaPath }) {
+export function callCodex({ prompt, schemaPath, model }) {
   const args = [
     "codex", "exec",
-    "-m", getModel(),
+    "-m", model || DEFAULT_MODEL,
     "-c", 'web_search="disabled"',
     "-c", 'model_reasoning_effort="none"',
     "--sandbox", "read-only",
@@ -144,7 +140,7 @@ export function callCodex({ prompt, schemaPath }) {
   return parseRecommendation(result.stdout ?? "");
 }
 
-export function runRefiner({ currentPolicy, auditSummary }) {
+export function runRefiner({ currentPolicy, auditSummary, model }) {
   const prompt = buildPrompt({ currentPolicy, auditSummary });
-  return callCodex({ prompt, schemaPath: SCHEMA_PATH });
+  return callCodex({ prompt, schemaPath: SCHEMA_PATH, model });
 }
