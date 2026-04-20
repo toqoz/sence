@@ -248,3 +248,30 @@ describe("integration: patch + rollback via tmux", { skip: !hasPrereqs() && "tmu
     assert.ok(existsSync(policyPath), `fence.json should exist at ${policyPath}`);
   });
 });
+
+describe("integration: --patch input normalization", { skip: !hasFence() && "fence not available" }, () => {
+  it("strips null and empty fields before writing fence.json", () => {
+    const tmp = mkdtempSync(join(TEST_TMP, "patch-null-"));
+    try {
+      const patchFile = join(tmp, "patch.json");
+      writeFileSync(patchFile, JSON.stringify({
+        network: null,
+        filesystem: { allowRead: [] },
+        extends: "code",
+      }));
+      const configDir = join(tmp, "config");
+      const dataDir = join(tmp, "data");
+      const r = spawnSync("node", [BIN, "--suggest", "never", "--patch", patchFile, "--", "echo", "x"], {
+        encoding: "utf-8",
+        env: { ...process.env, XDG_CONFIG_HOME: configDir, XDG_DATA_HOME: dataDir },
+        timeout: 15_000,
+      });
+      assert.equal(r.status, 0, `sence failed: ${r.stderr}`);
+      const policyPath = join(configDir, "sence", "default:default", "fence.json");
+      const policy = JSON.parse(readFileSync(policyPath, "utf-8"));
+      assert.deepEqual(policy, { extends: "code" }, `unexpected fence.json: ${JSON.stringify(policy)}`);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
