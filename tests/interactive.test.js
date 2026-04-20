@@ -20,7 +20,13 @@ function sleep(ms) {
 }
 
 function hasFence() {
-  return spawnSync("fence", ["--version"], { encoding: "utf-8" }).status === 0;
+  const r = spawnSync("fence", ["--version"], { encoding: "utf-8" });
+  if (r.status !== 0) return false;
+  // sence requires --fence-log-file, added in fence 0.1.48
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(r.stdout ?? "");
+  if (!m) return false;
+  const [major, minor, patch] = m.slice(1).map(Number);
+  return major > 0 || minor > 1 || (minor === 1 && patch >= 48);
 }
 
 function hasTmux() {

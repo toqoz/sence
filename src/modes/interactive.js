@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
-import { createInterface } from "node:readline";
 import { writeFileSync, readFileSync, mkdtempSync } from "node:fs";
+import { createInterface } from "node:readline";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-import { buildFenceArgs } from "../executor.js";
+import { buildFenceArgs, teeMonitorLog } from "../executor.js";
 import { audit } from "../auditor.js";
 import { callCodex } from "../suggester.js";
 import { ensurePolicy, writePolicy, diffPolicy, validatePolicy, mergePolicy, defaultPolicyForProfile } from "../policy.js";
@@ -91,7 +91,7 @@ export async function runInteractiveMode({ command, policyPath, snapshotDir, pro
     );
     process.exit(2);
   }
-  const fenceArgs = buildFenceArgs({ command, settingsPath: policyPath, isolateStderr: true });
+  const fenceArgs = buildFenceArgs({ command, settingsPath: policyPath });
 
   const { exitCode, denials } = await runAndMonitor({ fenceArgs, paneId });
 
@@ -172,13 +172,14 @@ export async function runInteractiveMode({ command, policyPath, snapshotDir, pro
 function runAndMonitor({ fenceArgs, paneId }) {
   return new Promise((resolve) => {
     const child = spawn(fenceArgs[0], fenceArgs.slice(1), {
-      stdio: ["inherit", "inherit", "pipe", process.stderr.fd],
+      stdio: ["inherit", "inherit", "inherit", "pipe"],
     });
 
     const denials = [];
     let debounceTimer = null;
+    let interrupted = false;
+    let exited = false;
 
-    // Clean up child on Ctrl-C
     const cleanup = () => {
       if (!exited) {
         child.kill("SIGKILL");
@@ -187,41 +188,34 @@ function runAndMonitor({ fenceArgs, paneId }) {
     };
     process.on("SIGINT", cleanup);
     process.on("SIGTERM", cleanup);
-    let interrupted = false;
-    let exited = false;
 
-    const stderrRl = createInterface({ input: child.stderr });
-
-    stderrRl.on("line", (line) => {
-      if (!line.startsWith("[fence:")) {
-        if (!line.startsWith("[fence]")) process.stderr.write(line + "\n");
-        return;
-      }
+    teeMonitorLog(child.stdio[3], (line) => {
       if (!line.includes("✗")) return;
-
       denials.push(line);
 
-      if (!interrupted) {
-        interrupted = true;
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          // ESC to interrupt agent, then kill
-          sendEscape(paneId);
+      if (interrupted) return;
+      interrupted = true;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        // ESC to interrupt agent, then kill
+        sendEscape(paneId);
+        setTimeout(() => {
+          if (exited) return;
+          child.kill("SIGTERM");
           setTimeout(() => {
-            if (exited) return;
-            child.kill("SIGTERM");
-            // SIGKILL fallback: check if process actually exited, not just child.killed
-            setTimeout(() => {
-              if (!exited) child.kill("SIGKILL");
-            }, KILL_WAIT_MS);
-          }, ESC_WAIT_MS);
-        }, DEBOUNCE_MS);
-      }
+            if (!exited) child.kill("SIGKILL");
+          }, KILL_WAIT_MS);
+        }, ESC_WAIT_MS);
+      }, DEBOUNCE_MS);
     });
 
-    child.on("exit", (code, signal) => {
+    // Mark exited early so the kill-ladder above short-circuits, but wait
+    // for "close" so the fd3 pipe drains and no trailing denial is lost.
+    child.on("exit", () => {
       exited = true;
-      stderrRl.close();
+    });
+
+    child.on("close", (code, signal) => {
       if (debounceTimer) clearTimeout(debounceTimer);
       process.removeListener("SIGINT", cleanup);
       process.removeListener("SIGTERM", cleanup);

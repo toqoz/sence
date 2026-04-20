@@ -1,126 +1,78 @@
-import { spawnSync } from "node:child_process";
-import { openSync, closeSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { createInterface } from "node:readline";
 
-const FENCE_LINE_RE = /^\[fence[:\w]*\]/;
-
-export function buildFenceArgs({ command, settingsPath, template, isolateStderr = false }) {
-  const args = ["fence", "-m"];
+export function buildFenceArgs({ command, settingsPath, template }) {
+  // fd 3 is wired to a pipe by the caller; fence writes monitor/debug logs
+  // there while the command's own stdout/stderr stream through fd 1/2.
+  const args = ["fence", "-m", "--fence-log-file", "/dev/fd/3"];
   if (settingsPath) {
     args.push("--settings", settingsPath);
   }
   if (template) {
     args.push("--template", template);
   }
-  if (isolateStderr) {
-    // Restore child stderr from inherited fd 3 (the real tty), then
-    // close fd 3 so the child doesn't leak it. Fence monitor output
-    // stays on fd 2 (a pipe the caller reads).
-    args.push("--", "sh", "-c", 'exec 2>&3 3>&-; exec "$@"', "sh", ...command);
-  } else {
-    args.push("--", ...command);
-  }
+  args.push("--", ...command);
   return args;
 }
 
-export function splitStderr(stderr) {
-  // Split on \n and \r — programs like curl use \r for progress updates,
-  // which can splice fence monitor lines mid-line (e.g. "\r  0  ...[fence:http] ...")
-  const segments = stderr.split(/\r?\n|\r/);
-  const monitorLines = [];
-  const stderrLines = [];
-
-  for (const seg of segments) {
-    if (FENCE_LINE_RE.test(seg)) {
-      monitorLines.push(seg);
-    } else {
-      // A segment may contain an embedded fence line after a \r-overwritten prefix
-      const idx = seg.indexOf("[fence:");
-      if (idx > 0 && FENCE_LINE_RE.test(seg.slice(idx))) {
-        monitorLines.push(seg.slice(idx));
-        stderrLines.push(seg.slice(0, idx));
-      } else {
-        stderrLines.push(seg);
-      }
-    }
-  }
-
-  return {
-    monitorLog: monitorLines.join("\n"),
-    commandStderr: stderrLines.join("\n").trim(),
-  };
-}
-
-export function hasTty() {
-  try {
-    const fd = openSync("/dev/tty", "r");
-    closeSync(fd);
-    return true;
-  } catch {
-    return false;
-  }
+// Stream fence's log fd to process.stderr (tee) while delivering each line
+// to onLine for caller-side bookkeeping. Returns the readline interface.
+export function teeMonitorLog(stream, onLine) {
+  const rl = createInterface({ input: stream });
+  rl.on("line", (line) => {
+    process.stderr.write(line + "\n");
+    onLine(line);
+  });
+  return rl;
 }
 
 export function execute({ command, cwd, profile, settingsPath, template }) {
-  const ttyAvailable = hasTty();
-  const args = buildFenceArgs({ command, settingsPath, template, isolateStderr: ttyAvailable });
-  const startedAt = new Date().toISOString();
+  return new Promise((resolve) => {
+    const args = buildFenceArgs({ command, settingsPath, template });
+    const startedAt = new Date().toISOString();
 
-  // fd 3 = real tty (stderr) so the child can restore its stderr there
-  const stdio = ["inherit", "inherit", "pipe"];
-  if (ttyAvailable) stdio.push(process.stderr.fd);
+    const child = spawn(args[0], args.slice(1), {
+      cwd,
+      stdio: ["inherit", "inherit", "inherit", "pipe"],
+    });
 
-  const result = spawnSync(args[0], args.slice(1), {
-    cwd,
-    stdio,
-    maxBuffer: 10 * 1024 * 1024,
+    const monitorLines = [];
+    teeMonitorLog(child.stdio[3], (line) => monitorLines.push(line));
+
+    let spawnError = null;
+    child.on("error", (err) => {
+      spawnError = err;
+    });
+
+    child.on("close", (code, signal) => {
+      const finishedAt = new Date().toISOString();
+      if (spawnError) {
+        resolve({
+          command,
+          cwd: cwd ?? process.cwd(),
+          exitCode: 127,
+          profile: profile ?? "default",
+          startedAt,
+          finishedAt,
+          monitorLog: "",
+          spawnError: spawnError.message,
+        });
+        return;
+      }
+
+      const exitCode = code != null ? code : signal ? 128 : 1;
+      const execResult = {
+        command,
+        cwd: cwd ?? process.cwd(),
+        exitCode,
+        profile: profile ?? "default",
+        startedAt,
+        finishedAt,
+        monitorLog: monitorLines.join("\n"),
+        stdout: "",
+      };
+      if (signal) execResult.signal = signal;
+      resolve(execResult);
+    });
   });
-
-  const finishedAt = new Date().toISOString();
-
-  if (result.error) {
-    return {
-      command,
-      cwd: cwd ?? process.cwd(),
-      exitCode: 127,
-      profile: profile ?? "default",
-      startedAt,
-      finishedAt,
-      monitorLog: "",
-      commandStderr: "",
-      spawnError: result.error.message,
-    };
-  }
-
-  const exitCode =
-    result.status != null
-      ? result.status
-      : result.signal
-        ? 128
-        : 1;
-
-  const stderrStr = result.stderr?.toString("utf-8") ?? "";
-  const { monitorLog, commandStderr } = splitStderr(stderrStr);
-
-  // Forward the command's stderr (non-fence lines) to the terminal
-  if (commandStderr) {
-    process.stderr.write(commandStderr + "\n");
-  }
-
-  const execResult = {
-    command,
-    cwd: cwd ?? process.cwd(),
-    exitCode,
-    profile: profile ?? "default",
-    startedAt,
-    finishedAt,
-    monitorLog,
-    commandStderr,
-    stdout: "",
-  };
-
-  if (result.signal) {
-    execResult.signal = result.signal;
-  }
-
-  return execResult;
 }

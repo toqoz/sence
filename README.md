@@ -12,7 +12,7 @@ A thin fence wrapper - suggests policy refinements.
 ## Requirements
 
 - Node.js >= 20
-- [`fence(1)`](https://github.com/Use-Tusk/fence) — sandbox runtime
+- [`fence(1)`](https://github.com/Use-Tusk/fence) >= 0.1.48 — sandbox runtime (uses `--fence-log-file`)
 - [`codex(1)`](https://github.com/openai/codex) — LLM backend for policy suggestions
 - `tmux(1)` >= 3.2 (only for `--interactive` mode)
 
@@ -118,16 +118,6 @@ rollback writes directly without creating a new snapshot, so repeated
 rollback to the same step always reaches the same state.
 
 ## Known limitations
-
-- **TTY-dependent features**: with a TTY, sence passes an extra
-  inherited fd to isolate fence monitor output from agent stderr.
-  Without a TTY (e.g. CI), this isolation is unavailable — policy
-  suggestions are disabled and audit output is marked as unverified,
-  since a wrapped command could emit fake fence monitor lines.
-  Sandbox enforcement still works regardless.
-  Once `fence --fence-log-file` (Use-Tusk/fence#126) is broadly
-  available, this workaround will be replaced by reading monitor
-  output from a log file, removing the TTY dependency entirely.
 
 - **codex dependency**: policy suggestions require `codex(1)`.
   Without it, `--suggest auto` falls back to showing raw audit

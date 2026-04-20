@@ -16,7 +16,13 @@ function hasTmux() {
 }
 
 function hasFence() {
-  return spawnSync("fence", ["--version"], { encoding: "utf-8" }).status === 0;
+  const r = spawnSync("fence", ["--version"], { encoding: "utf-8" });
+  if (r.status !== 0) return false;
+  // sence requires --fence-log-file, added in fence 0.1.48
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(r.stdout ?? "");
+  if (!m) return false;
+  const [major, minor, patch] = m.slice(1).map(Number);
+  return major > 0 || minor > 1 || (minor === 1 && patch >= 48);
 }
 
 function hasPrereqs() {
@@ -159,7 +165,7 @@ describe("integration: batch mode via tmux", { skip: !hasPrereqs() && "tmux or f
   });
 });
 
-describe("integration: stderr isolation", { skip: !hasPrereqs() && "tmux or fence not available" }, () => {
+describe("integration: monitor log channel separation", { skip: !hasPrereqs() && "tmux or fence not available" }, () => {
   before(async () => {
     SESSION = newSession();
     tmux("new-session", "-d", "-s", SESSION, "-x", "120", "-y", "40");
@@ -168,8 +174,9 @@ describe("integration: stderr isolation", { skip: !hasPrereqs() && "tmux or fenc
   after(() => tmux("kill-session", "-t", SESSION));
 
   it("fake fence lines from agent do not appear in audit", async () => {
-    // Agent writes a fake [fence:http] line to stderr
-    // With stderr isolation, this goes to the terminal (visible in pane) but NOT parsed as monitor
+    // Fence log arrives on its own fd via --fence-log-file, so a fake
+    // [fence:http] line on the command's stderr reaches the terminal
+    // but is never treated as a monitor event.
     const cmd = `node ${BIN} --suggest never --verbose -- node -e 'process.stderr.write("[fence:http] 00:00:00 ✗ CONNECT 403 fake.evil https://fake.evil:443 (0s)\\n")'; echo DONE`;
     sendKeys(cmd, "Enter");
     const content = await waitForContent(/DONE/);

@@ -1,5 +1,5 @@
 import { writeFileSync, readFileSync, mkdtempSync } from "node:fs";
-import { execute, hasTty } from "./executor.js";
+import { execute } from "./executor.js";
 import { audit } from "./auditor.js";
 import { runSuggester } from "./suggester.js";
 import { formatText, formatJson } from "./reporter.js";
@@ -247,7 +247,7 @@ export async function run(argv) {
     }
   }
 
-  const execResult = execute({
+  const execResult = await execute({
     command: opts.command,
     profile: opts.profile,
     settingsPath: policyPath,
@@ -273,13 +273,7 @@ export async function run(argv) {
   let rec = { autoApplied: false };
   const wantSuggest = opts.suggest === "auto" && hasDenials;
 
-  // Without TTY, stderr isolation is unavailable — skip suggester to avoid spoofed audit feeding policy suggestions
-  const canSuggest = wantSuggest && hasTty();
-  if (wantSuggest && !hasTty()) {
-    process.stderr.write("[sence] No TTY — skipping policy suggestions (audit data may be spoofed without stderr isolation).\n");
-  }
-
-  if (canSuggest) {
+  if (wantSuggest) {
     rec = runSuggester({ currentPolicy, auditSummary, model: opts.model });
 
     if (rec.proposedPolicy) {
@@ -306,10 +300,6 @@ export async function run(argv) {
     rec.error;
 
   if (showReport) {
-    if (!hasTty() && hasDenials) {
-      process.stderr.write("[sence] Warning: no TTY — audit data is unverified (stderr isolation not available).\n");
-    }
-
     const output =
       opts.report === "json"
         ? formatJson(execResult, auditSummary, rec)
