@@ -371,26 +371,45 @@ describe("integration: suggest → patch → re-run loop", { skip: (!hasFence() 
 });
 
 describe("integration: --patch input normalization", { skip: !hasFence() && "fence not available" }, () => {
-  it("strips null and empty fields before writing fence.json", () => {
+  function runPatch(tmp, patch, prevPatch) {
+    const patchFile = join(tmp, "patch.json");
+    const configDir = join(tmp, "config");
+    const dataDir = join(tmp, "data");
+    const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_DATA_HOME: dataDir };
+    if (prevPatch) {
+      const prevFile = join(tmp, "prev.json");
+      writeFileSync(prevFile, JSON.stringify(prevPatch));
+      const r0 = spawnSync("node", [BIN, "--suggest", "never", "--patch", prevFile, "--", "echo", "x"], { encoding: "utf-8", env, timeout: 15_000 });
+      assert.equal(r0.status, 0, `seed failed: ${r0.stderr}`);
+    }
+    writeFileSync(patchFile, JSON.stringify(patch));
+    const r = spawnSync("node", [BIN, "--suggest", "never", "--patch", patchFile, "--", "echo", "x"], { encoding: "utf-8", env, timeout: 15_000 });
+    assert.equal(r.status, 0, `sence failed: ${r.stderr}`);
+    const policyPath = join(configDir, "sence", "default:default", "fence.json");
+    return JSON.parse(readFileSync(policyPath, "utf-8"));
+  }
+
+  it("strips null fields before writing fence.json", () => {
     const tmp = mkdtempSync(join(TEST_TMP, "patch-null-"));
     try {
-      const patchFile = join(tmp, "patch.json");
-      writeFileSync(patchFile, JSON.stringify({
-        network: null,
-        filesystem: { allowRead: [] },
-        extends: "code",
-      }));
-      const configDir = join(tmp, "config");
-      const dataDir = join(tmp, "data");
-      const r = spawnSync("node", [BIN, "--suggest", "never", "--patch", patchFile, "--", "echo", "x"], {
-        encoding: "utf-8",
-        env: { ...process.env, XDG_CONFIG_HOME: configDir, XDG_DATA_HOME: dataDir },
-        timeout: 15_000,
-      });
-      assert.equal(r.status, 0, `sence failed: ${r.stderr}`);
-      const policyPath = join(configDir, "sence", "default:default", "fence.json");
-      const policy = JSON.parse(readFileSync(policyPath, "utf-8"));
-      assert.deepEqual(policy, { extends: "code" }, `unexpected fence.json: ${JSON.stringify(policy)}`);
+      // null fields drop entirely; empty arrays are preserved (they have a meaning)
+      const policy = runPatch(tmp, { network: null, filesystem: { allowRead: [] }, extends: "code" });
+      assert.deepEqual(policy, { extends: "code", filesystem: { allowRead: [] } });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves empty arrays so --patch can revoke an existing allowlist", () => {
+    const tmp = mkdtempSync(join(TEST_TMP, "patch-revoke-"));
+    try {
+      // Seed an allowlist, then attempt to clear it via empty array.
+      const policy = runPatch(
+        tmp,
+        { network: { allowedDomains: [] } },
+        { network: { allowedDomains: ["example.com"] } },
+      );
+      assert.deepEqual(policy.network.allowedDomains, [], `expected cleared allowlist, got: ${JSON.stringify(policy)}`);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

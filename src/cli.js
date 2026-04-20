@@ -3,7 +3,7 @@ import { execute } from "./executor.js";
 import { audit } from "./auditor.js";
 import { runSuggester } from "./suggester.js";
 import { formatText, formatJson } from "./reporter.js";
-import { resolvePolicyPath, resolveSnapshotDir, ensurePolicy, writePolicy, diffPolicy, rollbackPolicy, validatePolicy, mergePolicy, stripEmpty, resolveProfileName, defaultPolicyForProfile } from "./policy.js";
+import { resolvePolicyPath, resolveSnapshotDir, ensurePolicy, writePolicy, diffPolicy, rollbackPolicy, validatePolicy, mergePolicy, stripNulls, resolveProfileName, defaultPolicyForProfile } from "./policy.js";
 import { runInteractiveMode } from "./modes/interactive.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -229,7 +229,7 @@ export async function run(argv) {
   if (opts.patch) {
     try {
       const patchData = JSON.parse(readFileSync(opts.patch, "utf-8"));
-      const normalizedPatch = stripEmpty(patchData) ?? {};
+      const normalizedPatch = stripNulls(patchData) ?? {};
       const merged = mergePolicy(currentPolicy, normalizedPatch);
       const policyErrors = validatePolicy(merged);
       if (policyErrors.length > 0) {

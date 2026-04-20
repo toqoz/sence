@@ -12,6 +12,7 @@ import {
   diffPolicy,
   mergePolicy,
   stripEmpty,
+  stripNulls,
   listSnapshots,
   rollbackPolicy,
   validatePolicy,
@@ -407,6 +408,46 @@ describe("stripEmpty", () => {
       filesystem: { allowRead: [], allowWrite: null },
     };
     assert.deepEqual(stripEmpty(patch), { extends: "code" });
+  });
+});
+
+describe("stripNulls", () => {
+  it("returns null/primitives unchanged", () => {
+    assert.equal(stripNulls(null), null);
+    assert.equal(stripNulls(42), 42);
+    assert.equal(stripNulls("x"), "x");
+  });
+
+  it("returns arrays unchanged regardless of length", () => {
+    assert.deepEqual(stripNulls([]), []);
+    assert.deepEqual(stripNulls([1, 2, 3]), [1, 2, 3]);
+  });
+
+  it("drops null fields from an object", () => {
+    assert.deepEqual(stripNulls({ a: null, b: 1 }), { b: 1 });
+  });
+
+  it("preserves empty arrays inside an object (revocation semantics)", () => {
+    assert.deepEqual(
+      stripNulls({ network: { allowedDomains: [] } }),
+      { network: { allowedDomains: [] } },
+    );
+  });
+
+  it("preserves empty objects after stripping all nulls", () => {
+    assert.deepEqual(stripNulls({ a: { b: null } }), { a: {} });
+  });
+
+  it("handles the realistic fence.json mixed patch", () => {
+    const patch = {
+      extends: "code",
+      network: null,
+      filesystem: { allowRead: [], allowWrite: null },
+    };
+    assert.deepEqual(stripNulls(patch), {
+      extends: "code",
+      filesystem: { allowRead: [] },
+    });
   });
 });
 

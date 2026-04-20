@@ -148,9 +148,13 @@ export function validatePolicy(policy) {
 }
 
 // Recursively drop null values, empty arrays, and resulting empty objects.
-// Used to normalize patch input before merging so null/empty fields don't
-// leak into fence.json. The LLM suggester sets unchanged sections to null
-// per its prompt contract; user-authored --patch files may do the same.
+// Used by the LLM suggester path: the structured-output schema forces
+// every property to be present, so the model fills unchanged sections
+// with null/[] per the prompt contract, and we want a minimal diff.
+//
+// Do NOT use this for user-authored --patch files: it would silently
+// turn `{network:{allowedDomains:[]}}` (revoke allowlist) into a no-op.
+// Use stripNulls() for that path.
 export function stripEmpty(obj) {
   if (obj == null || typeof obj !== "object") return obj;
   if (Array.isArray(obj)) return obj.length === 0 ? undefined : obj;
@@ -160,6 +164,21 @@ export function stripEmpty(obj) {
     if (stripped !== undefined && stripped !== null) out[k] = stripped;
   }
   return Object.keys(out).length === 0 ? undefined : out;
+}
+
+// Recursively drop null values only. Empty arrays and empty objects are
+// preserved because they carry meaning in user-authored --patch files
+// (e.g. `{network:{allowedDomains:[]}}` revokes the network allowlist).
+// Null is the only value that has no representation in fence.json, so
+// stripping it just prevents accidental leaks.
+export function stripNulls(obj) {
+  if (obj == null || typeof obj !== "object" || Array.isArray(obj)) return obj;
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === null) continue;
+    out[k] = stripNulls(v);
+  }
+  return out;
 }
 
 // Deep-merge a partial patch into a base policy.
