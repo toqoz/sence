@@ -166,11 +166,13 @@ export function stripEmpty(obj) {
   return Object.keys(out).length === 0 ? undefined : out;
 }
 
-// Recursively drop null values only. Empty arrays and empty objects are
-// preserved because they carry meaning in user-authored --patch files
-// (e.g. `{network:{allowedDomains:[]}}` revokes the network allowlist).
-// Null is the only value that has no representation in fence.json, so
-// stripping it just prevents accidental leaks.
+// Recursively drop null values only. Null has no representation in
+// fence.json, so stripping it prevents accidental leaks. Empty arrays
+// are preserved because mergePolicy treats arrays as wholesale
+// replacements, so `{network:{allowedDomains:[]}}` revokes an existing
+// allowlist. Empty objects are preserved as a side-effect and currently
+// have no special meaning under mergePolicy (they recurse into a no-op);
+// to clear an entire section, revoke its individual array fields.
 export function stripNulls(obj) {
   if (obj == null || typeof obj !== "object" || Array.isArray(obj)) return obj;
   const out = {};
