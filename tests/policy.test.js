@@ -300,6 +300,20 @@ describe("validatePolicy", () => {
     assert.equal(errors.length, 0);
   });
 
+  it("aggregates multiple violations from one policy", () => {
+    const errors = validatePolicy({
+      extends: "evil-template",
+      network: { allowedDomains: ["*"] },
+      filesystem: { allowRead: ["~/.ssh/id_rsa", "~/**"] },
+    });
+    // extends + wildcard domain + credential path + broad glob = at least 4
+    assert.ok(errors.length >= 4, `expected >=4 errors, got ${errors.length}: ${errors.join("; ")}`);
+    assert.ok(errors.some((e) => e.includes("unknown extends")));
+    assert.ok(errors.some((e) => e.includes("wildcard")));
+    assert.ok(errors.some((e) => e.includes(".ssh")));
+    assert.ok(errors.some((e) => e.includes("glob too broad")));
+  });
+
   it("rejects every credential path in CREDENTIAL_PATTERNS", () => {
     const paths = [
       "~/.ssh/id_rsa", "~/.aws/credentials", "~/.gnupg/secring.gpg",
