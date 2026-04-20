@@ -55,6 +55,97 @@ describe("integration: CLI basics", () => {
   });
 });
 
+describe("integration: CLI safety and lifecycle", () => {
+  function run(args, env, timeout = 10_000) {
+    return spawnSync("node", [BIN, ...args], {
+      encoding: "utf-8",
+      env: { ...process.env, ...env },
+      timeout,
+    });
+  }
+
+  it("creates an empty fence.json for the default profile when missing", () => {
+    const tmp = mkdtempSync(join(TEST_TMP, "default-init-"));
+    try {
+      run(["--suggest", "never", "--", "echo", "x"], {
+        XDG_CONFIG_HOME: join(tmp, "config"),
+        XDG_DATA_HOME: join(tmp, "data"),
+      });
+      const policyPath = join(tmp, "config", "sence", "default:default", "fence.json");
+      assert.ok(existsSync(policyPath), `policy file should exist at ${policyPath}`);
+      assert.deepEqual(JSON.parse(readFileSync(policyPath, "utf-8")), {});
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("seeds extends-template fence.json for a template profile when missing", () => {
+    const tmp = mkdtempSync(join(TEST_TMP, "template-init-"));
+    try {
+      run(["--suggest", "never", "--profile", "code-strict:foo", "--", "echo", "x"], {
+        XDG_CONFIG_HOME: join(tmp, "config"),
+        XDG_DATA_HOME: join(tmp, "data"),
+      });
+      const policyPath = join(tmp, "config", "sence", "code-strict:foo", "fence.json");
+      assert.ok(existsSync(policyPath), `policy file should exist at ${policyPath}`);
+      assert.deepEqual(JSON.parse(readFileSync(policyPath, "utf-8")), { extends: "code-strict" });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fails with actionable guidance when fence.json is corrupt", () => {
+    const tmp = mkdtempSync(join(TEST_TMP, "corrupt-"));
+    try {
+      const policyPath = join(tmp, "config", "sence", "default:default", "fence.json");
+      mkdirSync(dirname(policyPath), { recursive: true });
+      writeFileSync(policyPath, "{ broken json !!!");
+      const r = run(["--suggest", "never", "--", "echo", "x"], {
+        XDG_CONFIG_HOME: join(tmp, "config"),
+        XDG_DATA_HOME: join(tmp, "data"),
+      });
+      assert.equal(r.status, 2);
+      assert.ok(r.stderr.includes("corrupt"), `expected 'corrupt' in stderr:\n${r.stderr}`);
+      assert.ok(r.stderr.includes("Fix or remove"), `expected guidance in stderr:\n${r.stderr}`);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects --rollback when no snapshots exist", () => {
+    const tmp = mkdtempSync(join(TEST_TMP, "rollback-empty-"));
+    try {
+      const r = run(["--rollback"], {
+        XDG_CONFIG_HOME: join(tmp, "config"),
+        XDG_DATA_HOME: join(tmp, "data"),
+      });
+      assert.equal(r.status, 1);
+      assert.ok(r.stderr.includes("Only 0 snapshot(s) available"), `got stderr:\n${r.stderr}`);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses --patch that grants credential paths", () => {
+    const tmp = mkdtempSync(join(TEST_TMP, "credpath-"));
+    try {
+      const patchFile = join(tmp, "patch.json");
+      writeFileSync(patchFile, JSON.stringify({
+        filesystem: { allowRead: ["~/.ssh/id_rsa"] },
+      }));
+      const r = run(["--suggest", "never", "--patch", patchFile, "--", "echo", "x"], {
+        XDG_CONFIG_HOME: join(tmp, "config"),
+        XDG_DATA_HOME: join(tmp, "data"),
+      });
+      assert.equal(r.status, 2);
+      assert.ok(r.stderr.includes("Refusing to apply unsafe policy"), `got stderr:\n${r.stderr}`);
+      assert.ok(r.stderr.includes(".ssh"), `expected '.ssh' in stderr:\n${r.stderr}`);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
 // Tests that need tmux + fence
 let sessionCounter = 0;
 function newSession() {
