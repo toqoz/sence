@@ -136,10 +136,21 @@ export async function runInteractiveMode({ command, policyPath, snapshotDir, pro
   }
   const fenceArgs = buildFenceArgs({ command, settingsPath: policyPath });
 
-  const { exitCode, denials } = await runAndMonitor({ fenceArgs, paneId, logPath });
+  const { exitCode, denials, interventionApproved } = await runAndMonitor({
+    fenceArgs,
+    paneId,
+    logPath,
+    suggest,
+  });
 
   if (denials.length === 0) {
     // No denials — normal exit
+    process.exit(exitCode);
+  }
+
+  if (interventionApproved !== true) {
+    const reason = suggest === "never" ? "--suggest never" : "user declined";
+    logEvent(logPath, `[sence] Skipping suggestions (${reason}), ${denials.length} denial(s) detected.`);
     process.exit(exitCode);
   }
 
@@ -149,11 +160,6 @@ export async function runInteractiveMode({ command, policyPath, snapshotDir, pro
   // Audit
   const monitorLog = denials.join("\n");
   const auditSummary = audit({ exitCode, monitorLog });
-
-  if (suggest === "never") {
-    logEvent(logPath, `[sence] ${denials.length} denial(s) detected. Skipping suggestions (--suggest never).`);
-    process.exit(exitCode);
-  }
 
   // Suggest
   logEvent(logPath, "[sence] Analyzing sandbox violations...");
@@ -228,16 +234,18 @@ export async function runInteractiveMode({ command, policyPath, snapshotDir, pro
   process.exit(exitCode);
 }
 
-function runAndMonitor({ fenceArgs, paneId, logPath }) {
+function runAndMonitor({ fenceArgs, paneId, logPath, suggest }) {
   return new Promise((resolve) => {
     const child = spawn(fenceArgs[0], fenceArgs.slice(1), {
       stdio: ["inherit", "inherit", "inherit", "pipe"],
     });
 
-    const denials = [];
+    let denials = [];
     let debounceTimer = null;
     let interrupted = false;
     let exited = false;
+    // "accept" | "continue" | "deny" | null (never prompted)
+    let finalDecision = null;
 
     const cleanup = () => {
       if (!exited) {
@@ -248,6 +256,17 @@ function runAndMonitor({ fenceArgs, paneId, logPath }) {
     process.on("SIGINT", cleanup);
     process.on("SIGTERM", cleanup);
 
+    const gracefulKill = () => {
+      sendEscape(paneId);
+      setTimeout(() => {
+        if (exited) return;
+        child.kill("SIGTERM");
+        setTimeout(() => {
+          if (!exited) child.kill("SIGKILL");
+        }, KILL_WAIT_MS);
+      }, ESC_WAIT_MS);
+    };
+
     teeMonitorLog(child.stdio[3], (line) => {
       if (!isSignificantDenial(line)) return;
       denials.push(line);
@@ -256,15 +275,25 @@ function runAndMonitor({ fenceArgs, paneId, logPath }) {
       interrupted = true;
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        // ESC to interrupt agent, then kill
-        sendEscape(paneId);
-        setTimeout(() => {
-          if (exited) return;
-          child.kill("SIGTERM");
-          setTimeout(() => {
-            if (!exited) child.kill("SIGKILL");
-          }, KILL_WAIT_MS);
-        }, ESC_WAIT_MS);
+        logEvent(logPath, `[sence] Denial detected (${denials.length}); prompting user.`);
+        for (const d of denials) logEvent(logPath, `  ${d}`);
+        const decision = askIntervention({
+          denials,
+          logPath,
+          suggestEnabled: suggest !== "never",
+        });
+        logEvent(logPath, `[sence] User decision: ${decision}.`);
+
+        if (decision === "continue") {
+          // Agent keeps running. Reset so future denials re-prompt, and drop
+          // already-acknowledged ones so the next popup shows only new info.
+          denials = [];
+          interrupted = false;
+          return;
+        }
+
+        finalDecision = decision; // "accept" or "deny"
+        gracefulKill();
       }, DEBOUNCE_MS);
     }, { logPath });
 
@@ -278,9 +307,105 @@ function runAndMonitor({ fenceArgs, paneId, logPath }) {
       if (debounceTimer) clearTimeout(debounceTimer);
       process.removeListener("SIGINT", cleanup);
       process.removeListener("SIGTERM", cleanup);
-      resolve({ exitCode: code ?? (signal ? 128 : 0), denials });
+      resolve({
+        exitCode: code ?? (signal ? 128 : 0),
+        denials,
+        interventionApproved: finalDecision === "accept",
+      });
     });
   });
+}
+
+// Returns one of: "accept" | "continue" | "deny".
+// - accept:   kill the agent and run the LLM suggestion flow (prefill resume)
+// - continue: leave the agent running; denial already logged
+// - deny:     kill the agent; skip the suggestion flow
+// With suggestEnabled=false (--suggest never), only "continue" / "deny" are
+// offered — "close" in the UI, internally "deny".
+function askIntervention({ denials, logPath, suggestEnabled }) {
+  // Env bypass: skip the popup and use the specified decision. Intended for
+  // tests and headless/automated sence runs. Not exposed as a CLI flag.
+  const envDefault = process.env.SENCE_INTERVENTION;
+  if (envDefault === "accept" || envDefault === "continue" || envDefault === "deny") {
+    logEvent(logPath, `[sence] SENCE_INTERVENTION=${envDefault}: skipping popup.`);
+    return envDefault;
+  }
+
+  if (!supportsPopup()) {
+    // Old tmux: cannot prompt. Preserve prior behavior (always kill + LLM)
+    // when suggestions are enabled; otherwise just kill.
+    logEvent(logPath, "[sence] Cannot prompt — tmux popup unavailable. Defaulting.");
+    return suggestEnabled ? "accept" : "deny";
+  }
+
+  const lines = [];
+  lines.push("=== Sandbox Denial Detected ===");
+  lines.push("");
+  const shown = denials.slice(0, 20);
+  for (const d of shown) lines.push(`  ${d}`);
+  if (denials.length > shown.length) {
+    lines.push(`  … and ${denials.length - shown.length} more`);
+  }
+  lines.push("");
+
+  let promptLine;
+  let caseBlock;
+  if (suggestEnabled) {
+    lines.push("  [a]ccept   — kill agent, run LLM suggestion, prefill resume command");
+    lines.push("  [c]ontinue — leave agent running (denial is logged)");
+    lines.push("  [d]eny     — kill agent; skip suggestion");
+    lines.push("");
+    promptLine = `printf "[a]ccept / [c]ontinue / [d]eny? [a/c/D] "`;
+    caseBlock = [
+      `case "$answer" in`,
+      `  a|A) echo accept ;;`,
+      `  c|C) echo continue ;;`,
+      `  *) echo deny ;;`,
+      `esac`,
+    ];
+  } else {
+    lines.push("Running with --suggest never (LLM suggestions disabled).");
+    lines.push("");
+    lines.push("  [c]ontinue — leave agent running");
+    lines.push("  [k]close   — kill agent");
+    lines.push("");
+    promptLine = `printf "[c]ontinue / [k]close? [c/K] "`;
+    caseBlock = [
+      `case "$answer" in`,
+      `  c|C) echo continue ;;`,
+      `  *) echo deny ;;`,
+      `esac`,
+    ];
+  }
+  const content = lines.join("\n");
+
+  const tmpDir = mkdtempSync(join(tmpdir(), "sence-intervene-"));
+  const reviewFile = join(tmpDir, "denial.txt");
+  const scriptFile = join(tmpDir, "ask.sh");
+  const resultFile = join(tmpDir, "result");
+
+  writeFileSync(reviewFile, content);
+  writeFileSync(scriptFile, [
+    "#!/bin/sh",
+    `cat ${shellQuote(reviewFile)}`,
+    promptLine,
+    `read answer`,
+    `{`,
+    ...caseBlock,
+    `} > ${shellQuote(resultFile)}`,
+  ].join("\n") + "\n");
+
+  displayPopup({ command: `sh ${shellQuote(scriptFile)}` });
+
+  try {
+    const decision = readFileSync(resultFile, "utf-8").trim();
+    if (decision === "accept" || decision === "continue" || decision === "deny") {
+      return decision;
+    }
+    return "deny";
+  } catch {
+    return "deny";
+  }
 }
 
 async function askPolicyApply({ auditSummary, explanation, acceptedAdditions = [], blockedAdditions = [], policyDiff, paneId, logPath }) {
@@ -331,11 +456,14 @@ async function askPolicyApply({ auditSummary, explanation, acceptedAdditions = [
 
     displayPopup({ command: `sh ${shellQuote(scriptFile)}` });
 
+    let accepted = false;
     try {
-      return readFileSync(resultFile, "utf-8").trim() === "ACCEPTED";
+      accepted = readFileSync(resultFile, "utf-8").trim() === "ACCEPTED";
     } catch {
-      return false;
+      accepted = false;
     }
+    logEvent(logPath, `[sence] Policy patch ${accepted ? "accepted" : "rejected"} by user.`);
+    return accepted;
   }
 
   // No popup (tmux < 3.2): cannot prompt without polluting the pane.

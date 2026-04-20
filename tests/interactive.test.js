@@ -123,7 +123,9 @@ describe("interactive: sence monitors denial and interrupts mock agent", { skip:
   after(() => killSession());
 
   it("detects denial, sends ESC, kills process, shows audit", () => {
-    const cmd = `node ${BIN} --suggest never --interactive -- node ${MOCK_AGENT}`;
+    // SENCE_INTERVENTION=deny skips the popup and proceeds straight to the
+    // kill (matches the prior behavior these assertions were written against).
+    const cmd = `SENCE_INTERVENTION=deny node ${BIN} --suggest never --interactive -- node ${MOCK_AGENT}`;
     sendKeys(cmd, "Enter");
 
     // Wait for the full flow: agent starts → denial → ESC → kill → audit
