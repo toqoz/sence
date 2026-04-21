@@ -23,7 +23,7 @@ import {
   openSplitPane,
   killPane,
 } from "../tmux.js";
-import { shellQuote } from "../cli.js";
+import { shellQuote, senseExecName } from "../cli.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CHEATSHEET = readFileSync(join(__dirname, "..", "..", "docs", "fence-cheatsheet.md"), "utf-8");
@@ -297,7 +297,7 @@ function formatSuggestion({ title, explanation, accepted, blocked, policyDiff, p
 }
 
 function buildReRunCommand({ patchId, profile, suffix }) {
-  const parts = ["sence", "--patch", patchId];
+  const parts = [senseExecName(), "--patch", patchId];
   if (profile !== "default") parts.push("--profile", shellQuote(profile));
   parts.push("--interactive", "--", suffix);
   return parts.join(" ");

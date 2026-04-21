@@ -1,11 +1,11 @@
-import { readFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, readFileSync, statSync } from "node:fs";
 import { execute } from "./executor.js";
 import { audit } from "./auditor.js";
 import { runSuggester, loadExtendsTemplate } from "./suggester.js";
 import { formatText, formatJson } from "./reporter.js";
 import { resolvePolicyPath, resolveSnapshotDir, resolvePatchDir, resolvePatchPath, writePatchToCache, ensurePolicy, writePolicy, diffPolicy, rollbackPolicy, validatePolicy, mergePolicy, stripNulls, resolveProfileName, resolveStateKey, defaultPolicyForProfile, assertExtendsImmutable, additionsToPatch, assessAddition } from "./policy.js";
 import { runInteractiveMode } from "./modes/interactive.js";
-import { join } from "node:path";
+import { basename, delimiter, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 
 const HELP_TEXT = `Usage: sence [options] [--] <command...>
        sence --interactive -- <agent-command...>
@@ -167,13 +167,69 @@ function shellQuote(s) {
   return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
+// Return the shell-safe string the user should type to invoke this sence
+// binary again. `process.argv[1]` is always absolute (the kernel rewrites
+// relative shebang paths before the interpreter runs), so we can't recover
+// the exact string the user typed. We approximate it in two steps:
+//   1. If `basename(argv[1])` is found on PATH — skipping non-file and
+//      non-executable entries the way a real shell search does — and the
+//      first executable match is the same file (dev+ino), collapse to the
+//      basename (so `sence` round-trips as `sence`, not the install path).
+//   2. Otherwise, if argv[1] is inside cwd, display it relative to cwd
+//      (so `bin/sence` round-trips as `bin/sence`). Fall back to the
+//      absolute path for anything outside cwd.
+// Shell aliases and functions that override the name are unobservable from
+// inside the process and are deliberately ignored.
+function senseExecName() {
+  const argv1 = process.argv[1];
+  if (!argv1) return "sence";
+  let argv1Stat;
+  try {
+    argv1Stat = statSync(argv1);
+  } catch {
+    return shellQuote(argv1);
+  }
+  const base = basename(argv1);
+  const pathDirs = (process.env.PATH || "").split(delimiter).filter(Boolean);
+  for (const dir of pathDirs) {
+    const candidate = resolvePath(dir, base);
+    let s;
+    try {
+      s = statSync(candidate);
+    } catch {
+      continue;
+    }
+    if (!s.isFile()) continue;
+    try {
+      accessSync(candidate, fsConstants.X_OK);
+    } catch {
+      continue;
+    }
+    // First executable PATH match: collapse only if it's the same file.
+    if (s.ino === argv1Stat.ino && s.dev === argv1Stat.dev) {
+      return shellQuote(base);
+    }
+    break;
+  }
+  return shellQuote(displayPath(argv1));
+}
+
+// Pick the shorter of cwd-relative vs absolute, preserving shell-executable
+// semantics. A bare basename like `sence` gets a `./` prefix so the shell
+// doesn't treat it as a PATH lookup.
+function displayPath(absPath) {
+  const rel = relative(process.cwd(), absPath);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return absPath;
+  return rel.includes("/") ? rel : `./${rel}`;
+}
+
 function buildSenseCmd(opts) {
-  const parts = ["sence"];
+  const parts = [senseExecName()];
   if (opts.profile !== "default") parts.push("--profile", shellQuote(opts.profile));
   return parts;
 }
 
-export { shellQuote };
+export { shellQuote, senseExecName };
 
 export async function run(argv) {
   const opts = parseArgs(argv);
