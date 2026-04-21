@@ -64,6 +64,25 @@ describe("parseArgs", () => {
     assert.equal(result.error, null);
   });
 
+  it("accepts short aliases -h/-V/-v/-i/-p", () => {
+    assert.equal(parseArgs(["-h"]).help, true);
+    assert.equal(parseArgs(["-V"]).version, true);
+    assert.equal(parseArgs(["-v", "echo", "hi"]).verbose, true);
+
+    const inter = parseArgs(["-i", "--", "claude"]);
+    assert.equal(inter.interactive, true);
+    assert.deepEqual(inter.command, ["claude"]);
+
+    const prof = parseArgs(["-p", "strict", "echo", "hi"]);
+    assert.equal(prof.profile, "strict");
+    assert.deepEqual(prof.command, ["echo", "hi"]);
+  });
+
+  it("leaves unknown short flags to the command (e.g. curl -s)", () => {
+    const result = parseArgs(["curl", "-s", "https://example.com"]);
+    assert.deepEqual(result.command, ["curl", "-s", "https://example.com"]);
+  });
+
   it("returns error when no command given", () => {
     const result = parseArgs([]);
     assert.ok(result.error);

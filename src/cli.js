@@ -19,8 +19,8 @@ const HELP_TEXT = `Usage: sence [options] [--] <command...>
 Run a command inside a fence sandbox with monitoring, audit, and policy advice.
 
 Options:
-  --interactive                     Interactive mode (monitors denials, auto-suggests policy, works with any agent)
-  --profile <name>             Policy profile (default: default)
+  -i, --interactive            Interactive mode (monitors denials, auto-suggests policy, works with any agent)
+  -p, --profile <name>         Policy profile (default: default)
                                Forms:
                                  <name>                        (→ default:<name>)
                                  <template>:<name>             (start from a fence template)
@@ -34,9 +34,9 @@ Options:
   --model <name>               LLM model for policy suggestions (default: gpt-5.4-mini)
   --suggest auto|never         When to generate advice (default: auto)
   --report text|json           Output format for audit report (default: text)
-  --verbose                    Always show sence audit output
-  --version                    Print sence version and exit
-  --help                       Show this help message
+  -v, --verbose                Always show sence audit output
+  -V, --version                Print sence version and exit
+  -h, --help                   Show this help message
 
 Examples:
   sence npm install
@@ -51,6 +51,13 @@ Examples:
 
 const FLAG_WITH_VALUE = new Set(["--suggest", "--report", "--profile", "--patch", "--model", "--tail"]);
 const BOOLEAN_FLAGS = new Set(["--verbose", "--help", "--version", "--interactive"]);
+const SHORT_ALIASES = {
+  "-h": "--help",
+  "-V": "--version",
+  "-v": "--verbose",
+  "-i": "--interactive",
+  "-p": "--profile",
+};
 
 export function parseArgs(argv) {
   const opts = {
@@ -71,7 +78,8 @@ export function parseArgs(argv) {
 
   let i = 0;
   while (i < argv.length) {
-    const arg = argv[i];
+    const raw = argv[i];
+    const arg = SHORT_ALIASES[raw] ?? raw;
     if (arg === "--") {
       i++;
       break;
