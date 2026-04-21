@@ -5,6 +5,7 @@ import { runSuggester, loadExtendsTemplate } from "./suggester.js";
 import { formatText, formatJson } from "./reporter.js";
 import { resolvePolicyPath, resolveSnapshotDir, resolvePatchDir, resolvePatchPath, writePatchToCache, ensurePolicy, writePolicy, diffPolicy, rollbackPolicy, validatePolicy, mergePolicy, stripNulls, resolveProfileName, resolveStateKey, defaultPolicyForProfile, assertExtendsImmutable, additionsToPatch, assessAddition } from "./policy.js";
 import { runInteractiveMode } from "./modes/interactive.js";
+import { runTailMode } from "./modes/tail.js";
 import { basename, delimiter, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 
 const HELP_TEXT = `Usage: sence [options] [--] <command...>
@@ -23,6 +24,8 @@ Options:
   --patch <id>                 Apply a suggested patch (identifier printed by a
                                prior sence run) from $XDG_CACHE_HOME/sence/patches/
   --rollback [STEP]            Rollback policy (default: 1)
+  --tail <path>                Follow a fence monitor log and colorize denial
+                               lines (used internally by --interactive)
   --model <name>               LLM model for policy suggestions (default: gpt-5.4-mini)
   --suggest auto|never         When to generate advice (default: auto)
   --report text|json           Output format for audit report (default: text)
@@ -40,7 +43,7 @@ Examples:
   sence --rollback
 `;
 
-const FLAG_WITH_VALUE = new Set(["--suggest", "--report", "--profile", "--patch", "--model"]);
+const FLAG_WITH_VALUE = new Set(["--suggest", "--report", "--profile", "--patch", "--model", "--tail"]);
 const BOOLEAN_FLAGS = new Set(["--verbose", "--help", "--interactive"]);
 
 export function parseArgs(argv) {
@@ -51,6 +54,7 @@ export function parseArgs(argv) {
     model: undefined,
     patch: undefined,
     rollback: undefined,
+    tail: undefined,
     interactive: false,
     verbose: false,
     help: false,
@@ -101,6 +105,7 @@ export function parseArgs(argv) {
 
   if (opts.help) return opts;
   if (opts.rollback !== undefined) return opts;
+  if (opts.tail !== undefined) return opts;
 
   opts.command = argv.slice(i);
 
@@ -242,6 +247,11 @@ export async function run(argv) {
   if (opts.error) {
     process.stderr.write(opts.error + "\n");
     process.exit(2);
+  }
+
+  if (opts.tail !== undefined) {
+    runTailMode(opts.tail);
+    return;
   }
 
   const configDir = getConfigDir();

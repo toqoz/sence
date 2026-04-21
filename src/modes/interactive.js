@@ -218,9 +218,11 @@ export async function runInteractiveMode({ command, policyPath, snapshotDir, get
 function openLogTailPane({ target, logPath }) {
   if (!logPath) return null;
   const q = shellQuote(logPath);
-  // Truncate the log so each run starts fresh, then `tail -F` so the pane
-  // keeps following even if the file is (re)created.
-  const inner = `: > ${q}; printf "[sence] monitor log: %s\\n" ${q}; exec tail -F ${q}`;
+  const exe = senseExecName();
+  // Truncate the log so each run starts fresh, then `sence --tail` so the
+  // pane keeps following even if the file is (re)created and so denial
+  // lines get colorized (red = significant, yellow = non-significant).
+  const inner = `: > ${q}; printf "[sence] monitor log: %s\\n" ${q}; exec ${exe} --tail ${q}`;
   const cmd = `sh -c ${shellQuote(inner)}`;
   return openSplitPane({ target, command: cmd, size: "8" });
 }

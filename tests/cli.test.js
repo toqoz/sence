@@ -117,6 +117,19 @@ describe("parseArgs", () => {
     assert.ok(result.error.includes("maybe"));
   });
 
+  it("parses --tail with a path and ignores the absent command", () => {
+    const result = parseArgs(["--tail", "/tmp/monitor.log"]);
+    assert.equal(result.tail, "/tmp/monitor.log");
+    assert.equal(result.error, null);
+    assert.deepEqual(result.command, []);
+  });
+
+  it("returns error when --tail is missing its value", () => {
+    const result = parseArgs(["--tail"]);
+    assert.ok(result.error);
+    assert.ok(result.error.includes("--tail"));
+  });
+
 });
 
 describe("senseExecName", () => {
