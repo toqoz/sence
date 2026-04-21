@@ -28,8 +28,9 @@ export function formatText(exec, audit, rec) {
       lines.push(`  output: ${rec.rawOutput}`);
     }
     lines.push("");
-  } else if (rec.explanation) {
-    lines.push(`Recommendation: ${rec.explanation}`);
+  } else if (rec.explanation || rec.title) {
+    if (rec.title) lines.push(`Recommendation [${rec.title}]: ${rec.explanation ?? ""}`.trimEnd());
+    else lines.push(`Recommendation: ${rec.explanation}`);
     lines.push("");
   }
 

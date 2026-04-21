@@ -193,4 +193,19 @@ describe("parseRecommendation", () => {
     const result = parseRecommendation(output);
     assert.equal(result.resumeCommand, "claude -c abc");
   });
+
+  it("preserves title when present and defaults to empty string otherwise", () => {
+    const withTitle = parseRecommendation(JSON.stringify({
+      proposedAdditions: [],
+      explanation: "none",
+      title: "npm registry",
+    }));
+    assert.equal(withTitle.title, "npm registry");
+
+    const without = parseRecommendation(JSON.stringify({
+      proposedAdditions: [],
+      explanation: "none",
+    }));
+    assert.equal(without.title, "");
+  });
 });

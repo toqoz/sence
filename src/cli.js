@@ -1,12 +1,11 @@
-import { writeFileSync, readFileSync, mkdtempSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { execute } from "./executor.js";
 import { audit } from "./auditor.js";
 import { runSuggester, loadExtendsTemplate } from "./suggester.js";
 import { formatText, formatJson } from "./reporter.js";
-import { resolvePolicyPath, resolveSnapshotDir, ensurePolicy, writePolicy, diffPolicy, rollbackPolicy, validatePolicy, mergePolicy, stripNulls, resolveProfileName, resolveStateKey, defaultPolicyForProfile, assertExtendsImmutable, additionsToPatch, assessAddition } from "./policy.js";
+import { resolvePolicyPath, resolveSnapshotDir, resolvePatchDir, resolvePatchPath, writePatchToCache, ensurePolicy, writePolicy, diffPolicy, rollbackPolicy, validatePolicy, mergePolicy, stripNulls, resolveProfileName, resolveStateKey, defaultPolicyForProfile, assertExtendsImmutable, additionsToPatch, assessAddition } from "./policy.js";
 import { runInteractiveMode } from "./modes/interactive.js";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 const HELP_TEXT = `Usage: sence [options] [--] <command...>
        sence --interactive -- <agent-command...>
@@ -21,7 +20,8 @@ Options:
                                  <template>:<name>             (start from a fence template)
                                  <template>:<name>:<config-dir> (place fence.json at <config-dir>/fence.json)
                                Run \`fence --list-templates\` for available templates
-  --patch <file>               Apply a policy patch file before running the command
+  --patch <id>                 Apply a suggested patch (identifier printed by a
+                               prior sence run) from $XDG_CACHE_HOME/sence/patches/
   --rollback [STEP]            Rollback policy (default: 1)
   --model <name>               LLM model for policy suggestions (default: gpt-5.4-mini)
   --suggest auto|never         When to generate advice (default: auto)
@@ -36,7 +36,7 @@ Examples:
   sence --profile code:default npm install
   sence --profile strict npm install
   sence --profile code:local:. npm install   # fence.json in cwd
-  sence --patch /tmp/sence-abc123.json npm install
+  sence --patch 2026-04-21-npm-registry-abcdef npm install
   sence --rollback
 `;
 
@@ -149,6 +149,15 @@ function getStateDir() {
   return join(process.env.HOME, ".local", "state");
 }
 
+function getCacheDir() {
+  if (process.env.XDG_CACHE_HOME) return process.env.XDG_CACHE_HOME;
+  if (!process.env.HOME) {
+    process.stderr.write("[sence] Fatal: HOME is not set.\n");
+    process.exit(2);
+  }
+  return join(process.env.HOME, ".cache");
+}
+
 function resolveMonitorLogPath({ stateDir, profile }) {
   return join(stateDir, "sence", resolveStateKey(profile), "monitor.log");
 }
@@ -190,6 +199,10 @@ export async function run(argv) {
   const policyPath = resolvePolicyPath({ configDir, profile: opts.profile });
   const snapshotDir = resolveSnapshotDir({ stateDir, profile: opts.profile });
   const logPath = resolveMonitorLogPath({ stateDir, profile: opts.profile });
+  // Patch cache is resolved lazily: paths that never touch suggested patches
+  // (e.g. --rollback, --suggest never with no patch generated) shouldn't
+  // require XDG_CACHE_HOME / HOME.
+  const getPatchDir = () => resolvePatchDir({ cacheDir: getCacheDir() });
 
   if (opts.rollback !== undefined) {
     let result;
@@ -213,6 +226,7 @@ export async function run(argv) {
       command: opts.command,
       policyPath,
       snapshotDir,
+      getPatchDir,
       profile: opts.profile,
       suggest: opts.suggest,
       model: opts.model,
@@ -240,10 +254,20 @@ export async function run(argv) {
     process.exit(2);
   }
 
-  // --patch: merge patch into current policy before running
+  // --patch: merge patch into current policy before running. The argument is
+  // an identifier produced by a previous sence run; the actual JSON lives in
+  // the cache dir. To hand-edit, modify the file under ~/.cache/sence/patches/
+  // directly rather than threading a new path through the CLI.
   if (opts.patch) {
+    let patchPath;
     try {
-      const patchData = JSON.parse(readFileSync(opts.patch, "utf-8"));
+      patchPath = resolvePatchPath(getPatchDir(), opts.patch);
+    } catch (err) {
+      process.stderr.write(`[sence] ${err.message}\n`);
+      process.exit(2);
+    }
+    try {
+      const patchData = JSON.parse(readFileSync(patchPath, "utf-8"));
       const normalizedPatch = stripNulls(patchData) ?? {};
       assertExtendsImmutable(currentPolicy, normalizedPatch);
       const merged = mergePolicy(currentPolicy, normalizedPatch);
@@ -259,7 +283,7 @@ export async function run(argv) {
       currentPolicy = merged;
       process.stderr.write(`[sence] Applied policy patch to ${policyPath}\n`);
     } catch (err) {
-      process.stderr.write(`[sence] Failed to apply patch: ${err.message}\n`);
+      process.stderr.write(`[sence] Failed to apply patch ${opts.patch} (${patchPath}): ${err.message}\n`);
       process.exit(2);
     }
   }
@@ -317,10 +341,7 @@ export async function run(argv) {
         rec.policyDiff = diffPolicy(currentPolicy, merged);
 
         if (rec.policyDiff) {
-          const tmpDir = mkdtempSync(join(tmpdir(), "sence-"));
-          const patchFile = join(tmpDir, "policy.json");
-          writeFileSync(patchFile, JSON.stringify(patch, null, 2) + "\n");
-          rec.patchFile = patchFile;
+          rec.patchId = writePatchToCache(getPatchDir(), patch, { slug: rec.title }).id;
         }
       }
     }
@@ -345,9 +366,9 @@ export async function run(argv) {
   }
 
   // Show apply command if patch was generated
-  if (rec.patchFile) {
+  if (rec.patchId) {
     const cmdParts = buildSenseCmd(opts);
-    cmdParts.push("--patch", shellQuote(rec.patchFile), "--", ...opts.command.map(shellQuote));
+    cmdParts.push("--patch", rec.patchId, "--", ...opts.command.map(shellQuote));
     process.stderr.write(`\nTo apply and re-run:\n  ${cmdParts.join(" ")}\n`);
   }
 

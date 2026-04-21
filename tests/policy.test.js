@@ -1,11 +1,15 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync, existsSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   resolvePolicyPath,
   resolveSnapshotDir,
+  resolvePatchDir,
+  resolvePatchPath,
+  slugify,
+  writePatchToCache,
   readPolicy,
   ensurePolicy,
   writePolicy,
@@ -52,6 +56,108 @@ describe("resolveSnapshotDir", () => {
   it("uses the derived state key for 3-component profile", () => {
     const path = resolveSnapshotDir({ stateDir: "/home/user/.local/state", profile: "code:build:/Users/toqoz/src/foo" });
     assert.equal(path, "/home/user/.local/state/sence/code-build--Users-toqoz-src-foo/snapshots");
+  });
+});
+
+describe("resolvePatchDir", () => {
+  it("resolves to <cacheDir>/sence/patches regardless of profile", () => {
+    const path = resolvePatchDir({ cacheDir: "/home/user/.cache" });
+    assert.equal(path, "/home/user/.cache/sence/patches");
+  });
+});
+
+describe("resolvePatchPath", () => {
+  it("resolves a valid id to <patchDir>/<id>.json", () => {
+    const path = resolvePatchPath("/cache/sence/patches", "2026-04-21-abcdef");
+    assert.equal(path, "/cache/sence/patches/2026-04-21-abcdef.json");
+  });
+
+  it("rejects ids containing path separators or parent refs", () => {
+    for (const bad of ["../escape", "a/b", "..", "a b", ""]) {
+      assert.throws(() => resolvePatchPath("/cache/sence/patches", bad), /invalid patch id/);
+    }
+  });
+});
+
+describe("slugify", () => {
+  it("lowercases, dash-joins, and strips leading/trailing dashes", () => {
+    assert.equal(slugify("Allow npm registry"), "allow-npm-registry");
+    assert.equal(slugify("  registry.npmjs.org HTTPS  "), "registry-npmjs-org-https");
+    assert.equal(slugify("!!!weird!!!"), "weird");
+    assert.equal(slugify(""), "");
+    assert.equal(slugify(null), "");
+    assert.equal(slugify(undefined), "");
+  });
+
+  it("clips long titles to 40 chars and trims a trailing partial-word dash", () => {
+    const out = slugify("a very long recommendation title that keeps going and going");
+    assert.ok(out.length <= 40, `got length ${out.length}: ${out}`);
+    assert.doesNotMatch(out, /-$/);
+  });
+});
+
+describe("writePatchToCache", () => {
+  let tmpDir;
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), "sence-test-")); });
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it("creates the patch dir and returns a unique {id, path} pair", () => {
+    const patchDir = join(tmpDir, "patches");
+    const r1 = writePatchToCache(patchDir, { network: { allow: ["a"] } });
+    const r2 = writePatchToCache(patchDir, { network: { allow: ["b"] } });
+    assert.notEqual(r1.id, r2.id);
+    assert.equal(r1.path, join(patchDir, `${r1.id}.json`));
+    // Shape without slug: YYYY-MM-DD-<6 hex>
+    assert.match(r1.id, /^\d{4}-\d{2}-\d{2}-[0-9a-f]{6}$/);
+    assert.equal(JSON.parse(readFileSync(r1.path, "utf-8")).network.allow[0], "a");
+    assert.equal(JSON.parse(readFileSync(r2.path, "utf-8")).network.allow[0], "b");
+  });
+
+  it("embeds a slug when one is supplied", () => {
+    const patchDir = join(tmpDir, "patches");
+    const { id } = writePatchToCache(patchDir, {}, { slug: "Allow npm registry" });
+    assert.match(id, /^\d{4}-\d{2}-\d{2}-allow-npm-registry-[0-9a-f]{6}$/);
+  });
+
+  it("falls back to no-slug form when the slug is blank after normalization", () => {
+    const patchDir = join(tmpDir, "patches");
+    const { id } = writePatchToCache(patchDir, {}, { slug: "!!!" });
+    assert.match(id, /^\d{4}-\d{2}-\d{2}-[0-9a-f]{6}$/);
+  });
+
+  it("never prunes the freshly-written patch even if it falls into the eviction slice", () => {
+    const patchDir = join(tmpDir, "patches");
+    // keep=0 is the adversarial case: without the "protect" guard, the
+    // pruner would delete every file including the one just written. This
+    // stands in for the mtime-tie race where readdirSync's order decides
+    // whether the fresh file ends up in slice(keep).
+    const { id, path } = writePatchToCache(patchDir, { i: "fresh" }, { keep: 0 });
+    assert.ok(existsSync(path), `fresh patch ${id} should survive aggressive pruning`);
+  });
+
+  it("prunes old patches beyond `keep`, preserving the newest by mtime", () => {
+    const patchDir = join(tmpDir, "patches");
+    // Write 5 patches without pruning, forcing distinct mtimes so ordering
+    // doesn't depend on filesystem timestamp granularity.
+    const paths = [];
+    for (let i = 0; i < 5; i++) {
+      const { path } = writePatchToCache(patchDir, { i }, { keep: 100 });
+      utimesSync(path, 1_700_000_000 + i, 1_700_000_000 + i);
+      paths.push(path);
+    }
+    // Now write one more with keep=3 to trigger pruning. It becomes the newest.
+    const { path: newest } = writePatchToCache(patchDir, { i: "newest" }, { keep: 3 });
+
+    const remaining = new Set(readdirSync(patchDir));
+    assert.equal(remaining.size, 3, `expected 3 files, got: ${[...remaining].join(", ")}`);
+    // The newest write + the two most-recently-touched of the original 5 survive.
+    for (const survivor of [newest, paths[4], paths[3]]) {
+      assert.ok(remaining.has(survivor.split("/").pop()), `expected ${survivor} to survive`);
+    }
+    // The oldest three must be gone.
+    for (const evicted of paths.slice(0, 3)) {
+      assert.ok(!existsSync(evicted), `expected ${evicted} to be pruned`);
+    }
   });
 });
 

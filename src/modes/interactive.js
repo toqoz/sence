@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
-import { writeFileSync, readFileSync, mkdtempSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import { buildFenceArgs, teeMonitorLog } from "../executor.js";
@@ -15,6 +14,7 @@ import {
   defaultPolicyForProfile,
   additionsToPatch,
   assessAddition,
+  writePatchToCache,
 } from "../policy.js";
 import {
   isInsideTmux,
@@ -100,7 +100,11 @@ ${screenContent.slice(-4000)}
 
 Reply with ONLY this JSON:
 
-{"proposedAdditions":[{"kind":"...","value":"...","riskLevel":"low|medium|high","rationale":"...","relatedDenial":"..."}],"explanation":"one short sentence","resumeCommand":"command to resume or null"}`;
+{"proposedAdditions":[{"kind":"...","value":"...","riskLevel":"low|medium|high","rationale":"...","relatedDenial":"..."}],"explanation":"one short sentence","title":"2-5 word headline","resumeCommand":"command to resume or null"}
+
+The \`title\` becomes a slug in the patch filename. Prefer concrete nouns over
+verbs and filler words, e.g. "npm registry", "example.com https", "project
+read". Lowercase is fine; non-alphanumeric characters will be normalized.`;
 }
 
 function runInteractiveSuggester({ currentPolicy, auditSummary, screenContent, originalCommand, model }) {
@@ -108,7 +112,7 @@ function runInteractiveSuggester({ currentPolicy, auditSummary, screenContent, o
   return callCodex({ prompt, schemaPath: INTERACTIVE_SCHEMA, model });
 }
 
-export async function runInteractiveMode({ command, policyPath, snapshotDir, profile, suggest = "auto", model, logPath }) {
+export async function runInteractiveMode({ command, policyPath, snapshotDir, getPatchDir, profile, suggest = "auto", model, logPath }) {
   if (!isInsideTmux()) {
     process.stderr.write("[sence] --interactive requires tmux.\n");
     process.exit(2);
@@ -183,6 +187,7 @@ export async function runInteractiveMode({ command, policyPath, snapshotDir, pro
   const policyErrors = validatePolicy(merged);
 
   process.stderr.write(formatSuggestion({
+    title: rec.title,
     explanation: rec.explanation,
     accepted,
     blocked,
@@ -191,12 +196,9 @@ export async function runInteractiveMode({ command, policyPath, snapshotDir, pro
   }));
 
   if (policyDiff && policyErrors.length === 0) {
-    const tmpDir = mkdtempSync(join(tmpdir(), "sence-"));
-    const patchFile = join(tmpDir, "policy.json");
-    writeFileSync(patchFile, JSON.stringify(patch, null, 2) + "\n");
-
+    const { id: patchId } = writePatchToCache(getPatchDir(), patch, { slug: rec.title });
     const suffix = rec.resumeCommand ? rec.resumeCommand : command.map(shellQuote).join(" ");
-    const reRunCmd = buildReRunCommand({ patchFile, profile, suffix });
+    const reRunCmd = buildReRunCommand({ patchId, profile, suffix });
     const label = rec.resumeCommand ? "To apply and resume" : "To apply and re-run";
     process.stderr.write(`\n${label}:\n  ${reRunCmd}\n`);
   }
@@ -256,10 +258,11 @@ function formatAuditHeader(auditSummary) {
   return lines.join("\n");
 }
 
-function formatSuggestion({ explanation, accepted, blocked, policyDiff, policyErrors }) {
+function formatSuggestion({ title, explanation, accepted, blocked, policyDiff, policyErrors }) {
   const lines = [];
-  if (explanation) {
-    lines.push(`Recommendation: ${explanation}`);
+  if (title || explanation) {
+    if (title) lines.push(`Recommendation [${title}]: ${explanation ?? ""}`.trimEnd());
+    else lines.push(`Recommendation: ${explanation}`);
     lines.push("");
   }
   if (accepted.length > 0) {
@@ -293,8 +296,8 @@ function formatSuggestion({ explanation, accepted, blocked, policyDiff, policyEr
   return lines.join("\n");
 }
 
-function buildReRunCommand({ patchFile, profile, suffix }) {
-  const parts = ["sence", "--patch", shellQuote(patchFile)];
+function buildReRunCommand({ patchId, profile, suffix }) {
+  const parts = ["sence", "--patch", patchId];
   if (profile !== "default") parts.push("--profile", shellQuote(profile));
   parts.push("--interactive", "--", suffix);
   return parts.join(" ");

@@ -6,7 +6,7 @@ A thin fence wrapper - suggests policy refinements.
 
     sence <command> [args...]
     sence --interactive -- <agent-command...>
-    sence --patch <file> -- <command> [args...]
+    sence --patch <id> -- <command> [args...]
     sence --rollback [STEP]
 
 ## Requirements
@@ -54,15 +54,15 @@ Run a command:
     [sence] exit: 1
     Audit summary:
       - denied network: registry.npmjs.org:443
-    Recommendation: Allow registry.npmjs.org for npm install.
+    Recommendation [npm registry]: Allow registry.npmjs.org for npm install.
     Proposed policy diff:
       ...
     To apply and re-run:
-      sence --patch /tmp/sence-xxxxx/policy.json -- npm install
+      sence --patch 2026-04-21-npm-registry-abcdef -- npm install
 
 Apply the suggestion:
 
-    $ sence --patch /tmp/sence-xxxxx/policy.json -- npm install
+    $ sence --patch 2026-04-21-npm-registry-abcdef -- npm install
 
 Undo it:
 
@@ -138,7 +138,7 @@ with:
                           <template>:<name>             → start from a fence template
                           <template>:<name>:<config-dir> → fence.json at <config-dir>/fence.json
     --model <name>        LLM model for policy suggestions (default: gpt-5.4-mini)
-    --patch <file>        apply a policy patch before running
+    --patch <id>          apply a suggested patch from the cache dir
     --rollback [STEP]     rollback to a previous policy snapshot (default: 1)
     --suggest auto|never
     --report text|json
@@ -176,10 +176,15 @@ sence writes in three places:
     $XDG_STATE_HOME/sence/<key>/
       ├── monitor.log                               fence audit log (--interactive)
       └── snapshots/<timestamp>-<seq>.json          rollback points, newest first
-    $TMPDIR/sence-XXXXXX/policy.json                ephemeral; pass to --patch
+    $XDG_CACHE_HOME/sence/patches/<id>.json         suggested patches; pass
+                                                    <id> (basename without .json)
+                                                    to --patch. <id> is
+                                                    YYYY-MM-DD-<slug>-<6 hex>.
+                                                    Latest 50 kept. Hand-edit
+                                                    the file directly to tweak.
 
 XDG defaults when unset: `$XDG_CONFIG_HOME` → `~/.config`,
-`$XDG_STATE_HOME` → `~/.local/state`.
+`$XDG_STATE_HOME` → `~/.local/state`, `$XDG_CACHE_HOME` → `~/.cache`.
 
 `<profile>` and `<key>` are derived from the `--profile` argument:
 

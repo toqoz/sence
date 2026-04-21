@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["proposedAdditions", "explanation", "resumeCommand"],
+  "required": ["proposedAdditions", "explanation", "resumeCommand", "title"],
   "additionalProperties": false,
   "properties": {
     "proposedAdditions": {
@@ -51,6 +51,10 @@
     "resumeCommand": {
       "type": ["string", "null"],
       "description": "The shell command to resume the agent session, or null if unknown."
+    },
+    "title": {
+      "type": "string",
+      "description": "2-5 word headline (e.g. \"allow npm registry\"). Used as a slug in the patch filename, so prefer concrete nouns and avoid filler words."
     }
   }
 }

@@ -29,6 +29,15 @@ function hasPrereqs() {
   return hasTmux() && hasFence();
 }
 
+// Seed a patch file in the cache dir under a chosen id so tests can pass that
+// id to `--patch`. Returns the id.
+function seedPatch(cacheDir, id, patch) {
+  const dir = join(cacheDir, "sence", "patches");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${id}.json`), JSON.stringify(patch));
+  return id;
+}
+
 // Tests that don't need tmux (no fence execution)
 describe("integration: CLI basics", () => {
   function sence(args) {
@@ -133,14 +142,15 @@ describe("integration: CLI safety and lifecycle", () => {
   it("refuses --patch that grants credential paths", () => {
     const tmp = mkdtempSync(join(TEST_TMP, "credpath-"));
     try {
-      const patchFile = join(tmp, "patch.json");
-      writeFileSync(patchFile, JSON.stringify({
+      const cacheDir = join(tmp, "cache");
+      const id = seedPatch(cacheDir, "credpath-test", {
         filesystem: { allowRead: ["~/.ssh/id_rsa"] },
-      }));
-      const r = run(["--suggest", "never", "--patch", patchFile, "--", "echo", "x"], {
+      });
+      const r = run(["--suggest", "never", "--patch", id, "--", "echo", "x"], {
         XDG_CONFIG_HOME: join(tmp, "config"),
         XDG_DATA_HOME: join(tmp, "data"),
         XDG_STATE_HOME: join(tmp, "state"),
+        XDG_CACHE_HOME: cacheDir,
       });
       assert.equal(r.status, 2);
       assert.ok(r.stderr.includes("Refusing to apply unsafe policy"), `got stderr:\n${r.stderr}`);
@@ -332,15 +342,15 @@ describe("integration: patch + rollback via tmux", { skip: !hasPrereqs() && "tmu
     const configDir = join(tmpDir, "config");
     const dataDir = join(tmpDir, "data");
     const stateDir = join(tmpDir, "state");
-    const patchFile = join(tmpDir, "patch.json");
+    const cacheDir = join(tmpDir, "cache");
 
     // Start from the `code` template profile so the patch only adds a
     // delta — sence refuses to rewrite "extends" via --patch.
-    writeFileSync(patchFile, JSON.stringify({
+    const id = seedPatch(cacheDir, "patch-smoke-seed", {
       network: { allowedDomains: ["example.com"] },
-    }, null, 2));
+    });
 
-    const cmd = `XDG_CONFIG_HOME=${configDir} XDG_DATA_HOME=${dataDir} XDG_STATE_HOME=${stateDir} node ${BIN} --profile code:patch-smoke --suggest never --patch ${patchFile} echo patched`;
+    const cmd = `XDG_CONFIG_HOME=${configDir} XDG_DATA_HOME=${dataDir} XDG_STATE_HOME=${stateDir} XDG_CACHE_HOME=${cacheDir} node ${BIN} --profile code:patch-smoke --suggest never --patch ${id} echo patched`;
     const out = await runAndCapture(cmd, 15_000);
     assert.ok(
       out.includes("Applied policy patch") || out.includes("patched"),
@@ -359,7 +369,8 @@ describe("integration: suggest → patch → re-run loop", { skip: (!hasFence() 
       const configDir = join(tmp, "config");
       const dataDir = join(tmp, "data");
       const stateDir = join(tmp, "state");
-      const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_DATA_HOME: dataDir, XDG_STATE_HOME: stateDir };
+      const cacheDir = join(tmp, "cache");
+      const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_DATA_HOME: dataDir, XDG_STATE_HOME: stateDir, XDG_CACHE_HOME: cacheDir };
 
       // Start from the `code` template: sence refuses suggestions that
       // would rewrite "extends", so the LLM must have a baseline to keep.
@@ -368,11 +379,11 @@ describe("integration: suggest → patch → re-run loop", { skip: (!hasFence() 
         encoding: "utf-8", env, timeout: 45_000,
       });
       assert.notEqual(r1.status, 0, "first run should fail due to network denial");
-      const match = r1.stderr.match(/--patch (\S+\/policy\.json)/);
-      assert.ok(match, `patch file hint not found in stderr:\n${r1.stderr.slice(-500)}`);
-      const patchFile = match[1];
+      const match = r1.stderr.match(/--patch (\S+)/);
+      assert.ok(match, `patch id hint not found in stderr:\n${r1.stderr.slice(-500)}`);
+      const patchId = match[1];
 
-      const r2 = spawnSync("node", [BIN, "--profile", profile, "--suggest", "never", "--patch", patchFile, "--", "curl", "-sf", "https://example.com"], {
+      const r2 = spawnSync("node", [BIN, "--profile", profile, "--suggest", "never", "--patch", patchId, "--", "curl", "-sf", "https://example.com"], {
         encoding: "utf-8", env, timeout: 20_000,
       });
       assert.equal(r2.status, 0, `retry should succeed. stderr:\n${r2.stderr.slice(-500)}`);
@@ -385,18 +396,17 @@ describe("integration: suggest → patch → re-run loop", { skip: (!hasFence() 
 
 describe("integration: --patch input normalization", { skip: !hasFence() && "fence not available" }, () => {
   function runPatch(tmp, patch, prevPatch) {
-    const patchFile = join(tmp, "patch.json");
     const configDir = join(tmp, "config");
     const dataDir = join(tmp, "data");
-    const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_DATA_HOME: dataDir };
+    const cacheDir = join(tmp, "cache");
+    const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_DATA_HOME: dataDir, XDG_CACHE_HOME: cacheDir };
     if (prevPatch) {
-      const prevFile = join(tmp, "prev.json");
-      writeFileSync(prevFile, JSON.stringify(prevPatch));
-      const r0 = spawnSync("node", [BIN, "--suggest", "never", "--patch", prevFile, "--", "echo", "x"], { encoding: "utf-8", env, timeout: 15_000 });
+      const prevId = seedPatch(cacheDir, "prev-seed", prevPatch);
+      const r0 = spawnSync("node", [BIN, "--suggest", "never", "--patch", prevId, "--", "echo", "x"], { encoding: "utf-8", env, timeout: 15_000 });
       assert.equal(r0.status, 0, `seed failed: ${r0.stderr}`);
     }
-    writeFileSync(patchFile, JSON.stringify(patch));
-    const r = spawnSync("node", [BIN, "--suggest", "never", "--patch", patchFile, "--", "echo", "x"], { encoding: "utf-8", env, timeout: 15_000 });
+    const id = seedPatch(cacheDir, "main-seed", patch);
+    const r = spawnSync("node", [BIN, "--suggest", "never", "--patch", id, "--", "echo", "x"], { encoding: "utf-8", env, timeout: 15_000 });
     assert.equal(r.status, 0, `sence failed: ${r.stderr}`);
     const policyPath = join(configDir, "sence", "default:default", "fence.json");
     return JSON.parse(readFileSync(policyPath, "utf-8"));
@@ -431,15 +441,15 @@ describe("integration: --patch input normalization", { skip: !hasFence() && "fen
   it("refuses a --patch that rewrites extends", () => {
     const tmp = mkdtempSync(join(TEST_TMP, "patch-extends-"));
     try {
-      const patchFile = join(tmp, "patch.json");
       const configDir = join(tmp, "config");
       const dataDir = join(tmp, "data");
-      const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_DATA_HOME: dataDir };
+      const cacheDir = join(tmp, "cache");
+      const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_DATA_HOME: dataDir, XDG_CACHE_HOME: cacheDir };
       // Seed a profile that already extends "code", then try to switch it.
-      writeFileSync(patchFile, JSON.stringify({ extends: "code-strict" }));
+      const id = seedPatch(cacheDir, "extends-seed", { extends: "code-strict" });
       const r = spawnSync(
         "node",
-        [BIN, "--profile", "code:guard", "--suggest", "never", "--patch", patchFile, "--", "echo", "x"],
+        [BIN, "--profile", "code:guard", "--suggest", "never", "--patch", id, "--", "echo", "x"],
         { encoding: "utf-8", env, timeout: 15_000 },
       );
       assert.notEqual(r.status, 0, "sence should refuse extends rewrite");

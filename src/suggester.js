@@ -88,7 +88,11 @@ ${JSON.stringify(auditSummary, null, 2)}
 
 Reply with ONLY this JSON, nothing else:
 
-{"proposedAdditions":[{"kind":"...","value":"...","riskLevel":"low|medium|high","rationale":"...","relatedDenial":"..."}],"explanation":"one short sentence"}`;
+{"proposedAdditions":[{"kind":"...","value":"...","riskLevel":"low|medium|high","rationale":"...","relatedDenial":"..."}],"explanation":"one short sentence","title":"2-5 word headline"}
+
+The \`title\` becomes a slug in the patch filename. Prefer concrete nouns over
+verbs and filler words, e.g. "npm registry", "example.com https", "project
+read". Lowercase is fine; non-alphanumeric characters will be normalized.`;
 }
 
 // Extract the first top-level JSON object from a string by brace-counting.
@@ -116,6 +120,7 @@ function finalizeParsed(parsed) {
   return {
     proposedAdditions: parsed.proposedAdditions,
     explanation: typeof parsed.explanation === "string" ? parsed.explanation : "",
+    title: typeof parsed.title === "string" ? parsed.title : "",
     resumeCommand: Object.hasOwn(parsed, "resumeCommand") ? parsed.resumeCommand : undefined,
     autoApplied: false,
   };
