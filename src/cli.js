@@ -403,6 +403,7 @@ export async function run(argv) {
   const wantSuggest = opts.suggest === "auto" && hasDenials;
 
   if (wantSuggest) {
+    process.stderr.write("[sence] generating suggestions...\n");
     rec = runSuggester({ currentPolicy, auditSummary, model: opts.model });
 
     if (Array.isArray(rec.proposedAdditions)) {

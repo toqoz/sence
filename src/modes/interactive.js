@@ -170,6 +170,7 @@ export async function runInteractiveMode({ command, policyPath, snapshotDir, get
     process.exit(exitCode);
   }
 
+  process.stderr.write("[sence] generating suggestions...\n");
   const rec = runInteractiveSuggester({
     currentPolicy,
     auditSummary,
