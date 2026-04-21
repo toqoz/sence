@@ -1,6 +1,9 @@
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseArgs } from "../src/cli.js";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseArgs, senseExecName } from "../src/cli.js";
 
 describe("parseArgs", () => {
   it("parses bare command", () => {
@@ -114,4 +117,108 @@ describe("parseArgs", () => {
     assert.ok(result.error.includes("maybe"));
   });
 
+});
+
+describe("senseExecName", () => {
+  let tmp;
+  let origArgv1;
+  let origPath;
+  let origCwd;
+
+  beforeEach(() => {
+    // Resolve realpath so macOS /var → /private/var symlinks don't break the
+    // cwd-relative comparison inside senseExecName.
+    tmp = realpathSync(mkdtempSync(join(tmpdir(), "sence-exec-")));
+    origArgv1 = process.argv[1];
+    origPath = process.env.PATH;
+    origCwd = process.cwd();
+  });
+
+  afterEach(() => {
+    process.argv[1] = origArgv1;
+    process.env.PATH = origPath;
+    process.chdir(origCwd);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  function makeExe(dir, name) {
+    mkdirSync(dir, { recursive: true });
+    const p = join(dir, name);
+    writeFileSync(p, "#!/bin/sh\nexit 0\n");
+    chmodSync(p, 0o755);
+    return p;
+  }
+
+  it("returns 'sence' when argv[1] is undefined", () => {
+    process.argv[1] = undefined;
+    assert.equal(senseExecName(), "sence");
+  });
+
+  it("returns argv[1] as-is when the file does not exist", () => {
+    const ghost = join(tmp, "does-not-exist");
+    process.argv[1] = ghost;
+    process.env.PATH = "";
+    assert.equal(senseExecName(), ghost);
+  });
+
+  it("collapses to basename when PATH resolves to the same file", () => {
+    const exe = makeExe(join(tmp, "bin"), "sence");
+    process.argv[1] = exe;
+    process.env.PATH = join(tmp, "bin");
+    assert.equal(senseExecName(), "sence");
+  });
+
+  it("does not collapse when the first PATH match is a different file", () => {
+    const real = makeExe(join(tmp, "real"), "sence");
+    makeExe(join(tmp, "fake"), "sence");
+    process.argv[1] = real;
+    process.env.PATH = [join(tmp, "fake"), join(tmp, "real")].join(":");
+    process.chdir(tmp);
+    assert.equal(senseExecName(), "real/sence");
+  });
+
+  it("skips directory PATH entries with the same basename", () => {
+    const exe = makeExe(join(tmp, "bin"), "sence");
+    mkdirSync(join(tmp, "dirfirst", "sence"), { recursive: true });
+    process.argv[1] = exe;
+    process.env.PATH = [join(tmp, "dirfirst"), join(tmp, "bin")].join(":");
+    assert.equal(senseExecName(), "sence");
+  });
+
+  it("skips non-executable PATH entries with the same basename", () => {
+    const exe = makeExe(join(tmp, "bin"), "sence");
+    mkdirSync(join(tmp, "nonx"), { recursive: true });
+    const nonx = join(tmp, "nonx", "sence");
+    writeFileSync(nonx, "");
+    chmodSync(nonx, 0o644);
+    process.argv[1] = exe;
+    process.env.PATH = [join(tmp, "nonx"), join(tmp, "bin")].join(":");
+    assert.equal(senseExecName(), "sence");
+  });
+
+  it("uses cwd-relative form when argv[1] is nested under cwd", () => {
+    const exe = makeExe(join(tmp, "bin"), "sence");
+    process.argv[1] = exe;
+    process.env.PATH = "";
+    process.chdir(tmp);
+    assert.equal(senseExecName(), "bin/sence");
+  });
+
+  it("prefixes ./ for a bare basename directly under cwd", () => {
+    const exe = join(tmp, "sence");
+    writeFileSync(exe, "#!/bin/sh\n");
+    chmodSync(exe, 0o755);
+    process.argv[1] = exe;
+    process.env.PATH = "";
+    process.chdir(tmp);
+    assert.equal(senseExecName(), "./sence");
+  });
+
+  it("keeps the absolute path when argv[1] is outside cwd", () => {
+    const exe = makeExe(join(tmp, "elsewhere"), "sence");
+    process.argv[1] = exe;
+    process.env.PATH = "";
+    // cwd remains origCwd (the repo root), which is outside tmp.
+    assert.equal(senseExecName(), exe);
+  });
 });
