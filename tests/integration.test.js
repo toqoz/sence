@@ -485,6 +485,29 @@ describe("integration: SENCE_PATCH input normalization", { skip: !hasFence() && 
     }
   });
 
+  it("scrubs SENCE_PATCH from the wrapped command's environment", () => {
+    const tmp = mkdtempSync(join(TEST_TMP, "patch-scrub-"));
+    try {
+      const configDir = join(tmp, "config");
+      const dataDir = join(tmp, "data");
+      const cacheDir = join(tmp, "cache");
+      const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_DATA_HOME: dataDir, XDG_CACHE_HOME: cacheDir };
+      const id = seedPatch(cacheDir, "scrub-test", {});
+      const r = spawnSync(
+        "node",
+        [BIN, "--suggest", "never", "--", "sh", "-c", "echo SENCE_PATCH_CHILD=${SENCE_PATCH:-unset}"],
+        { encoding: "utf-8", env: { ...env, SENCE_PATCH: id }, timeout: 15_000 },
+      );
+      assert.equal(r.status, 0, `sence failed: ${r.stderr}`);
+      assert.ok(
+        r.stdout.includes("SENCE_PATCH_CHILD=unset"),
+        `child should not see SENCE_PATCH; got stdout:\n${r.stdout}\nstderr:\n${r.stderr}`,
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("refuses a SENCE_PATCH that rewrites extends", () => {
     const tmp = mkdtempSync(join(TEST_TMP, "patch-extends-"));
     try {

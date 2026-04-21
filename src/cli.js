@@ -336,7 +336,14 @@ export async function run(argv) {
   // form (instead of a --patch flag) keeps shell history clean and lets the
   // user scope the apply to a single invocation without leaving a noisy,
   // hard-to-distinguish history entry.
+  //
+  // Scrub the variable immediately so it can't leak into the wrapped command
+  // (fence plus everything it spawns). A patch apply is a one-shot effect at
+  // the sence boundary; without scrubbing, an accidentally exported
+  // SENCE_PATCH — or a nested `sence` invocation launched by an agent — would
+  // silently re-apply on every descendant.
   const patchId = process.env.SENCE_PATCH || undefined;
+  delete process.env.SENCE_PATCH;
   if (patchId) {
     let patchPath;
     try {
