@@ -123,10 +123,10 @@ describe("parseArgs", () => {
     assert.equal(result.error, null);
   });
 
-  it("parses --patch option", () => {
-    const result = parseArgs(["--patch", "/tmp/policy.json", "echo", "hi"]);
-    assert.equal(result.patch, "/tmp/policy.json");
-    assert.deepEqual(result.command, ["echo", "hi"]);
+  it("rejects --patch (removed in favor of SENCE_PATCH env var)", () => {
+    const result = parseArgs(["--patch", "foo", "echo", "hi"]);
+    assert.ok(result.error);
+    assert.ok(result.error.includes("--patch"));
   });
 
   it("parses --suggest never with --interactive", () => {

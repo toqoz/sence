@@ -311,7 +311,7 @@ function formatSuggestion({ title, explanation, accepted, blocked, policyDiff, p
 }
 
 function buildReRunCommand({ patchId, profile, suffix }) {
-  const parts = [senseExecName(), "--patch", patchId];
+  const parts = [`SENCE_PATCH=${shellQuote(patchId)}`, senseExecName()];
   if (profile !== "default") parts.push("--profile", shellQuote(profile));
   parts.push("--interactive", "--", suffix);
   return parts.join(" ");

@@ -26,8 +26,6 @@ Options:
                                  <template>:<name>             (start from a fence template)
                                  <template>:<name>:<config-dir> (place fence.json at <config-dir>/fence.json)
                                Run \`fence --list-templates\` for available templates
-  --patch <id>                 Apply a suggested patch (identifier printed by a
-                               prior sence run) from $XDG_CACHE_HOME/sence/patches/
   --rollback [STEP]            Rollback policy (default: 1)
   --tail <path>                Follow a fence monitor log and colorize denial
                                lines (used internally by --interactive)
@@ -38,6 +36,11 @@ Options:
   -V, --version                Print sence version and exit
   -h, --help                   Show this help message
 
+Environment:
+  SENCE_PATCH=<id>             Apply a suggested patch (identifier printed by a
+                               prior sence run) from $XDG_CACHE_HOME/sence/patches/
+                               before executing the command.
+
 Examples:
   sence npm install
   sence --interactive -- claude -p "fix the failing tests"
@@ -45,11 +48,11 @@ Examples:
   sence --profile code:default npm install
   sence --profile strict npm install
   sence --profile code:local:. npm install   # fence.json in cwd
-  sence --patch 2026-04-21-npm-registry-abcdef npm install
+  SENCE_PATCH=2026-04-21-npm-registry-abcdef sence npm install
   sence --rollback
 `;
 
-const FLAG_WITH_VALUE = new Set(["--suggest", "--report", "--profile", "--patch", "--model", "--tail"]);
+const FLAG_WITH_VALUE = new Set(["--suggest", "--report", "--profile", "--model", "--tail"]);
 const BOOLEAN_FLAGS = new Set(["--verbose", "--help", "--version", "--interactive"]);
 const SHORT_ALIASES = {
   "-h": "--help",
@@ -65,7 +68,6 @@ export function parseArgs(argv) {
     report: "text",
     profile: "default",
     model: undefined,
-    patch: undefined,
     rollback: undefined,
     tail: undefined,
     interactive: false,
@@ -327,14 +329,18 @@ export async function run(argv) {
     process.exit(2);
   }
 
-  // --patch: merge patch into current policy before running. The argument is
+  // SENCE_PATCH: merge patch into current policy before running. The value is
   // an identifier produced by a previous sence run; the actual JSON lives in
   // the cache dir. To hand-edit, modify the file under ~/.cache/sence/patches/
-  // directly rather than threading a new path through the CLI.
-  if (opts.patch) {
+  // directly rather than threading a new path through the CLI. The env-var
+  // form (instead of a --patch flag) keeps shell history clean and lets the
+  // user scope the apply to a single invocation without leaving a noisy,
+  // hard-to-distinguish history entry.
+  const patchId = process.env.SENCE_PATCH || undefined;
+  if (patchId) {
     let patchPath;
     try {
-      patchPath = resolvePatchPath(getPatchDir(), opts.patch);
+      patchPath = resolvePatchPath(getPatchDir(), patchId);
     } catch (err) {
       process.stderr.write(`[sence] ${err.message}\n`);
       process.exit(2);
@@ -356,7 +362,7 @@ export async function run(argv) {
       currentPolicy = merged;
       process.stderr.write(`[sence] Applied policy patch to ${policyPath}\n`);
     } catch (err) {
-      process.stderr.write(`[sence] Failed to apply patch ${opts.patch} (${patchPath}): ${err.message}\n`);
+      process.stderr.write(`[sence] Failed to apply patch ${patchId} (${patchPath}): ${err.message}\n`);
       process.exit(2);
     }
   }
@@ -455,8 +461,8 @@ export async function run(argv) {
 
   // Show apply command if patch was generated
   if (rec.patchId) {
-    const cmdParts = buildSenseCmd(opts);
-    cmdParts.push("--patch", rec.patchId, "--", ...opts.command.map(shellQuote));
+    const cmdParts = [`SENCE_PATCH=${shellQuote(rec.patchId)}`, ...buildSenseCmd(opts)];
+    cmdParts.push("--", ...opts.command.map(shellQuote));
     process.stderr.write(`\nTo apply and re-run:\n  ${cmdParts.join(" ")}\n`);
   }
 

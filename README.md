@@ -6,7 +6,7 @@ A thin fence wrapper - suggests policy refinements.
 
     sence <command> [args...]
     sence --interactive -- <agent-command...>
-    sence --patch <id> -- <command> [args...]
+    SENCE_PATCH=<id> sence <command> [args...]
     sence --rollback [STEP]
 
 ## Requirements
@@ -58,11 +58,16 @@ Run a command:
     Proposed policy diff:
       ...
     To apply and re-run:
-      sence --patch 2026-04-21-npm-registry-abcdef -- npm install
+      SENCE_PATCH=2026-04-21-npm-registry-abcdef sence -- npm install
 
 Apply the suggestion:
 
-    $ sence --patch 2026-04-21-npm-registry-abcdef -- npm install
+    $ SENCE_PATCH=2026-04-21-npm-registry-abcdef sence -- npm install
+
+Passing the patch id as an environment variable (rather than a flag)
+scopes the apply to a single invocation and keeps shell history clean —
+repeat entries differ only in the env prefix, which most shells render
+distinctly from a bare `sence npm install`.
 
 Undo it:
 
@@ -83,7 +88,7 @@ agent exits, if any denials were logged, sence:
 1. Captures the pane (often contains the session/resume id)
 2. Prints an audit summary to stderr
 3. Runs the LLM suggester (unless `--suggest never`)
-4. Writes a patch file and prints a `sence --patch … --interactive --
+4. Writes a patch file and prints a `SENCE_PATCH=… sence --interactive --
    <resume>` line for you to copy and run
 
 ## Template profiles
@@ -132,18 +137,23 @@ with:
 
 ## Options
 
-    --interactive         interactive agent mode (real-time denial monitoring)
-    --profile <name>      policy profile (default: default)
+    -i, --interactive     interactive agent mode (real-time denial monitoring)
+    -p, --profile <name>  policy profile (default: default)
                           <name>                        → default:<name>
                           <template>:<name>             → start from a fence template
                           <template>:<name>:<config-dir> → fence.json at <config-dir>/fence.json
     --model <name>        LLM model for policy suggestions (default: gpt-5.4-mini)
-    --patch <id>          apply a suggested patch from the cache dir
     --rollback [STEP]     rollback to a previous policy snapshot (default: 1)
     --suggest auto|never
     --report text|json
-    --verbose
-    --help
+    -v, --verbose
+    -V, --version
+    -h, --help
+
+## Environment
+
+    SENCE_PATCH=<id>      apply a suggested patch from the cache dir
+                          (identifier printed by a prior sence run)
 
 ## Policy
 

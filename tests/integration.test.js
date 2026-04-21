@@ -145,18 +145,19 @@ describe("integration: CLI safety and lifecycle", () => {
     }
   });
 
-  it("refuses --patch that grants credential paths", () => {
+  it("refuses a SENCE_PATCH that grants credential paths", () => {
     const tmp = mkdtempSync(join(TEST_TMP, "credpath-"));
     try {
       const cacheDir = join(tmp, "cache");
       const id = seedPatch(cacheDir, "credpath-test", {
         filesystem: { allowRead: ["~/.ssh/id_rsa"] },
       });
-      const r = run(["--suggest", "never", "--patch", id, "--", "echo", "x"], {
+      const r = run(["--suggest", "never", "--", "echo", "x"], {
         XDG_CONFIG_HOME: join(tmp, "config"),
         XDG_DATA_HOME: join(tmp, "data"),
         XDG_STATE_HOME: join(tmp, "state"),
         XDG_CACHE_HOME: cacheDir,
+        SENCE_PATCH: id,
       });
       assert.equal(r.status, 2);
       assert.ok(r.stderr.includes("Refusing to apply unsafe policy"), `got stderr:\n${r.stderr}`);
@@ -166,22 +167,23 @@ describe("integration: CLI safety and lifecycle", () => {
     }
   });
 
-  // Regression: --patch used to be silently ignored when combined with
+  // Regression: SENCE_PATCH used to be silently ignored when combined with
   // --interactive because the cli.js interactive branch returned early,
-  // before the --patch block ran. The patch must be merged into fence.json
+  // before the patch block ran. The patch must be merged into fence.json
   // before runInteractiveMode is reached so fence actually honors it.
-  it("applies --patch before --interactive exits for missing tmux", () => {
+  it("applies SENCE_PATCH before --interactive exits for missing tmux", () => {
     const tmp = mkdtempSync(join(TEST_TMP, "patch-interactive-"));
     try {
       const cacheDir = join(tmp, "cache");
       const id = seedPatch(cacheDir, "interactive-patch", {
         network: { allowedDomains: ["example.com"] },
       });
-      const r = run(["--interactive", "--patch", id, "--", "echo", "x"], {
+      const r = run(["--interactive", "--", "echo", "x"], {
         XDG_CONFIG_HOME: join(tmp, "config"),
         XDG_DATA_HOME: join(tmp, "data"),
         XDG_STATE_HOME: join(tmp, "state"),
         XDG_CACHE_HOME: cacheDir,
+        SENCE_PATCH: id,
         TMUX: "",
       });
       // Without tmux, --interactive fails with exit 2 — but the patch must
@@ -395,7 +397,7 @@ describe("integration: patch + rollback via tmux", { skip: !hasPrereqs() && "tmu
       network: { allowedDomains: ["example.com"] },
     });
 
-    const cmd = `XDG_CONFIG_HOME=${configDir} XDG_DATA_HOME=${dataDir} XDG_STATE_HOME=${stateDir} XDG_CACHE_HOME=${cacheDir} node ${BIN} --profile code:patch-smoke --suggest never --patch ${id} echo patched`;
+    const cmd = `XDG_CONFIG_HOME=${configDir} XDG_DATA_HOME=${dataDir} XDG_STATE_HOME=${stateDir} XDG_CACHE_HOME=${cacheDir} SENCE_PATCH=${id} node ${BIN} --profile code:patch-smoke --suggest never echo patched`;
     const out = await runAndCapture(cmd, 15_000);
     assert.ok(
       out.includes("Applied policy patch") || out.includes("patched"),
@@ -424,12 +426,12 @@ describe("integration: suggest → patch → re-run loop", { skip: (!hasFence() 
         encoding: "utf-8", env, timeout: 45_000,
       });
       assert.notEqual(r1.status, 0, "first run should fail due to network denial");
-      const match = r1.stderr.match(/--patch (\S+)/);
+      const match = r1.stderr.match(/SENCE_PATCH=(\S+)/);
       assert.ok(match, `patch id hint not found in stderr:\n${r1.stderr.slice(-500)}`);
       const patchId = match[1];
 
-      const r2 = spawnSync("node", [BIN, "--profile", profile, "--suggest", "never", "--patch", patchId, "--", "curl", "-sf", "https://example.com"], {
-        encoding: "utf-8", env, timeout: 20_000,
+      const r2 = spawnSync("node", [BIN, "--profile", profile, "--suggest", "never", "--", "curl", "-sf", "https://example.com"], {
+        encoding: "utf-8", env: { ...env, SENCE_PATCH: patchId }, timeout: 20_000,
       });
       assert.equal(r2.status, 0, `retry should succeed. stderr:\n${r2.stderr.slice(-500)}`);
       assert.ok(!r2.stderr.includes("denied network: example.com"), "example.com should no longer be denied");
@@ -439,7 +441,7 @@ describe("integration: suggest → patch → re-run loop", { skip: (!hasFence() 
   });
 });
 
-describe("integration: --patch input normalization", { skip: !hasFence() && "fence not available" }, () => {
+describe("integration: SENCE_PATCH input normalization", { skip: !hasFence() && "fence not available" }, () => {
   function runPatch(tmp, patch, prevPatch) {
     const configDir = join(tmp, "config");
     const dataDir = join(tmp, "data");
@@ -447,11 +449,11 @@ describe("integration: --patch input normalization", { skip: !hasFence() && "fen
     const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_DATA_HOME: dataDir, XDG_CACHE_HOME: cacheDir };
     if (prevPatch) {
       const prevId = seedPatch(cacheDir, "prev-seed", prevPatch);
-      const r0 = spawnSync("node", [BIN, "--suggest", "never", "--patch", prevId, "--", "echo", "x"], { encoding: "utf-8", env, timeout: 15_000 });
+      const r0 = spawnSync("node", [BIN, "--suggest", "never", "--", "echo", "x"], { encoding: "utf-8", env: { ...env, SENCE_PATCH: prevId }, timeout: 15_000 });
       assert.equal(r0.status, 0, `seed failed: ${r0.stderr}`);
     }
     const id = seedPatch(cacheDir, "main-seed", patch);
-    const r = spawnSync("node", [BIN, "--suggest", "never", "--patch", id, "--", "echo", "x"], { encoding: "utf-8", env, timeout: 15_000 });
+    const r = spawnSync("node", [BIN, "--suggest", "never", "--", "echo", "x"], { encoding: "utf-8", env: { ...env, SENCE_PATCH: id }, timeout: 15_000 });
     assert.equal(r.status, 0, `sence failed: ${r.stderr}`);
     const policyPath = join(configDir, "sence", "default:default", "fence.json");
     return JSON.parse(readFileSync(policyPath, "utf-8"));
@@ -468,7 +470,7 @@ describe("integration: --patch input normalization", { skip: !hasFence() && "fen
     }
   });
 
-  it("preserves empty arrays so --patch can revoke an existing allowlist", () => {
+  it("preserves empty arrays so SENCE_PATCH can revoke an existing allowlist", () => {
     const tmp = mkdtempSync(join(TEST_TMP, "patch-revoke-"));
     try {
       // Seed an allowlist, then attempt to clear it via empty array.
@@ -483,7 +485,7 @@ describe("integration: --patch input normalization", { skip: !hasFence() && "fen
     }
   });
 
-  it("refuses a --patch that rewrites extends", () => {
+  it("refuses a SENCE_PATCH that rewrites extends", () => {
     const tmp = mkdtempSync(join(TEST_TMP, "patch-extends-"));
     try {
       const configDir = join(tmp, "config");
@@ -494,8 +496,8 @@ describe("integration: --patch input normalization", { skip: !hasFence() && "fen
       const id = seedPatch(cacheDir, "extends-seed", { extends: "code-strict" });
       const r = spawnSync(
         "node",
-        [BIN, "--profile", "code:guard", "--suggest", "never", "--patch", id, "--", "echo", "x"],
-        { encoding: "utf-8", env, timeout: 15_000 },
+        [BIN, "--profile", "code:guard", "--suggest", "never", "--", "echo", "x"],
+        { encoding: "utf-8", env: { ...env, SENCE_PATCH: id }, timeout: 15_000 },
       );
       assert.notEqual(r.status, 0, "sence should refuse extends rewrite");
       assert.ok(
