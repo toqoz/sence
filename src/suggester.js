@@ -62,6 +62,10 @@ ${JSON.stringify(currentPolicy, null, 2)}
 
 ## Audit (one or more denials)
 
+Repeated identical denials are collapsed. \`count\` records how many times the
+denial was seen and \`processes\` lists the processes that hit it. Treat
+\`count\` as recurrence, not as risk or priority.
+
 ${JSON.stringify(auditSummary, null, 2)}
 
 ## Rules

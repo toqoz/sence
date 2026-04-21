@@ -19,7 +19,8 @@ describe("audit", () => {
     assert.equal(result.deniedFiles.length, 1);
     assert.equal(result.deniedFiles[0].path, "/private/tmp/fence-write-test");
     assert.equal(result.deniedFiles[0].action, "file-write-create");
-    assert.equal(result.deniedFiles[0].process, "touch");
+    assert.deepEqual(result.deniedFiles[0].processes, ["touch"]);
+    assert.equal(result.deniedFiles[0].count, 1);
   });
 
   it("parses file path with spaces", () => {
@@ -28,7 +29,7 @@ describe("audit", () => {
     const result = audit({ exitCode: 1, monitorLog: log });
     assert.equal(result.deniedFiles.length, 1);
     assert.equal(result.deniedFiles[0].path, "/Users/alice/My Project/.env");
-    assert.equal(result.deniedFiles[0].process, "node");
+    assert.deepEqual(result.deniedFiles[0].processes, ["node"]);
   });
 
   it("parses network CONNECT denial from http proxy", () => {
@@ -100,6 +101,55 @@ describe("audit", () => {
     const result = audit({ exitCode: 1, monitorLog: log });
     assert.equal(result.deniedNetwork.length, 1);
     assert.equal(result.deniedFiles.length, 0);
+  });
+
+  it("collapses repeated file denials into one entry with a count", () => {
+    const log = Array.from({ length: 5 }, () =>
+      "[fence:logstream] 10:00:00 ✗ mach-lookup com.apple.pasteboard.1 (pbcopy:42)",
+    ).join("\n");
+    const result = audit({ exitCode: 1, monitorLog: log });
+    assert.equal(result.deniedFiles.length, 1);
+    assert.equal(result.deniedFiles[0].count, 5);
+    assert.deepEqual(result.deniedFiles[0].processes, ["pbcopy"]);
+  });
+
+  it("aggregates distinct processes that hit the same file denial", () => {
+    const log = [
+      "[fence:logstream] 10:00:00 ✗ mach-lookup com.apple.pasteboard.1 (pbcopy:42)",
+      "[fence:logstream] 10:00:01 ✗ mach-lookup com.apple.pasteboard.1 (pbpaste:43)",
+      "[fence:logstream] 10:00:02 ✗ mach-lookup com.apple.pasteboard.1 (pbcopy:44)",
+    ].join("\n");
+    const result = audit({ exitCode: 1, monitorLog: log });
+    assert.equal(result.deniedFiles.length, 1);
+    assert.equal(result.deniedFiles[0].count, 3);
+    assert.deepEqual(result.deniedFiles[0].processes, ["pbcopy", "pbpaste"]);
+  });
+
+  it("keeps distinct (action, path) pairs in separate entries", () => {
+    const log = [
+      "[fence:logstream] 10:00:00 ✗ mach-lookup com.apple.pasteboard.1 (pbcopy:42)",
+      "[fence:logstream] 10:00:01 ✗ file-read-data /etc/hosts (node:43)",
+    ].join("\n");
+    const result = audit({ exitCode: 1, monitorLog: log });
+    assert.equal(result.deniedFiles.length, 2);
+  });
+
+  it("collapses repeated network denials into one entry with a count", () => {
+    const log = Array.from({ length: 3 }, () =>
+      "[fence:http] 10:00:00 ✗ CONNECT 403 example.com https://example.com:443 (0s)",
+    ).join("\n");
+    const result = audit({ exitCode: 1, monitorLog: log });
+    assert.equal(result.deniedNetwork.length, 1);
+    assert.equal(result.deniedNetwork[0].count, 3);
+  });
+
+  it("keeps distinct (host, port) pairs in separate network entries", () => {
+    const log = [
+      "[fence:http] 10:00:00 ✗ CONNECT 403 example.com https://example.com:443 (0s)",
+      "[fence:http] 10:00:01 ✗ CONNECT 403 example.com https://example.com:80 (0s)",
+    ].join("\n");
+    const result = audit({ exitCode: 1, monitorLog: log });
+    assert.equal(result.deniedNetwork.length, 2);
   });
 });
 
