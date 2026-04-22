@@ -186,12 +186,13 @@ sence writes in three places:
     $XDG_STATE_HOME/sence/<key>/
       ├── monitor.log                               fence audit log (--interactive)
       └── snapshots/<timestamp>-<seq>.json          rollback points, newest first
-    $XDG_CACHE_HOME/sence/patches/<id>.json         suggested patches; pass
-                                                    <id> (basename without .json)
-                                                    to --patch. <id> is
-                                                    YYYY-MM-DD-<slug>-<6 hex>.
-                                                    Latest 50 kept. Hand-edit
-                                                    the file directly to tweak.
+    $XDG_CACHE_HOME/sence/patches/<id>.json         suggested patches; set
+                                                    SENCE_PATCH=<id> (basename
+                                                    without .json) to apply.
+                                                    <id> is YYYY-MM-DD-<slug>-
+                                                    <6 hex>. Latest 50 kept.
+                                                    Hand-edit the file directly
+                                                    to tweak.
 
 XDG defaults when unset: `$XDG_CONFIG_HOME` → `~/.config`,
 `$XDG_STATE_HOME` → `~/.local/state`, `$XDG_CACHE_HOME` → `~/.cache`.

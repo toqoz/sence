@@ -30,7 +30,7 @@ function hasPrereqs() {
 }
 
 // Seed a patch file in the cache dir under a chosen id so tests can pass that
-// id to `--patch`. Returns the id.
+// id via `SENCE_PATCH`. Returns the id.
 function seedPatch(cacheDir, id, patch) {
   const dir = join(cacheDir, "sence", "patches");
   mkdirSync(dir, { recursive: true });
@@ -308,7 +308,7 @@ describe("integration: batch mode via tmux", { skip: !hasPrereqs() && "tmux or f
     assert.ok(out.includes('"autoApplied"'));
   });
 
-  it("does not modify policy on a failed run without --patch", async () => {
+  it("does not modify policy on a failed run without SENCE_PATCH", async () => {
     const cfgDir = join(TEST_TMP, "noapply-config");
     const dataDir = join(TEST_TMP, "noapply-data");
     const stateDir = join(TEST_TMP, "noapply-state");
@@ -392,7 +392,7 @@ describe("integration: patch + rollback via tmux", { skip: !hasPrereqs() && "tmu
     const cacheDir = join(tmpDir, "cache");
 
     // Start from the `code` template profile so the patch only adds a
-    // delta — sence refuses to rewrite "extends" via --patch.
+    // delta — sence refuses to rewrite "extends" via SENCE_PATCH.
     const id = seedPatch(cacheDir, "patch-smoke-seed", {
       network: { allowedDomains: ["example.com"] },
     });
